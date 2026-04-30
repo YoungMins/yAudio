@@ -1,7 +1,10 @@
+pub mod models;
+
 use crate::error::{AudioError, AudioResult};
 use serde::Serialize;
 use std::env;
 use std::process::Command;
+use tauri::AppHandle;
 
 #[derive(Debug, Serialize)]
 pub struct MagicLinkResult {
@@ -51,5 +54,28 @@ pub async fn magic_link_extract(url: &str) -> AudioResult<MagicLinkResult> {
     Ok(MagicLinkResult {
         local_path,
         title: None,
+    })
+}
+
+#[derive(Debug, Serialize)]
+pub struct AiRunResult {
+    pub model_id: String,
+    pub output_path: String,
+}
+
+/// Placeholder ONNX inference entrypoint. The real implementation will
+/// load `model_path` via `ort` (ONNX Runtime), feed audio frames, and
+/// write a processed WAV next to the input. For now this just verifies
+/// that the requested model is installed so the UI flow is end-to-end.
+pub fn run_inference(
+    app: &AppHandle,
+    model_id: &str,
+    input_path: &str,
+) -> AudioResult<AiRunResult> {
+    let model_path = models::require_installed(app, model_id)?;
+    let _ = model_path;
+    Ok(AiRunResult {
+        model_id: model_id.to_string(),
+        output_path: format!("{input_path}.processed.wav"),
     })
 }

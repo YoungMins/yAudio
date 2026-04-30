@@ -1,6 +1,8 @@
 import type {
   AudioMeta,
+  DownloadProgress,
   MagicLinkResult,
+  ModelInfo,
   SilenceRange,
   WaveformPayload,
 } from "../types/audio";
@@ -77,7 +79,103 @@ export const tauri = {
       local_path: `/tmp/yaudio/${encodeURIComponent(url).slice(0, 32)}.wav`,
       title: null,
     })),
+
+  listModels: () => invokeOrMock<ModelInfo[]>("list_models", {}, mockModels),
+
+  downloadModel: async (id: string, onProgress?: (p: DownloadProgress) => void) => {
+    const invoke = await getInvoke();
+    if (!invoke) {
+      // browser preview: simulate a 2-second download for UX testing
+      return mockDownload(id, onProgress);
+    }
+    let unlisten: (() => void) | undefined;
+    if (onProgress) {
+      const event = await import("@tauri-apps/api/event");
+      unlisten = await event.listen<DownloadProgress>("model:progress", (e) => {
+        if (e.payload.id === id) onProgress(e.payload);
+      });
+    }
+    try {
+      await invoke<void>("download_model", { id });
+    } finally {
+      unlisten?.();
+    }
+  },
+
+  deleteModel: (id: string) =>
+    invokeOrMock<void>("delete_model", { id }, () => undefined as void),
+
+  modelsDir: () =>
+    invokeOrMock<string>("models_dir", {}, () => "(browser preview)"),
+
+  runAi: (modelId: string, inputPath: string) =>
+    invokeOrMock<{ model_id: string; output_path: string }>(
+      "run_ai",
+      { modelId, inputPath },
+      () => ({ model_id: modelId, output_path: `${inputPath}.processed.wav` })
+    ),
 };
+
+function mockModels(): ModelInfo[] {
+  return [
+    {
+      id: "rnnoise",
+      name: "RNNoise (ONNX)",
+      purpose: "AI Noise Clean — voice / ambient denoising",
+      url: "https://huggingface.co/onnx-community/rnnoise/resolve/main/rnnoise.onnx",
+      filename: "rnnoise.onnx",
+      size_bytes: 2_300_000,
+      sha256: null,
+      license: "BSD-3-Clause",
+      status: "notinstalled",
+      local_path: null,
+      on_disk_bytes: null,
+    },
+    {
+      id: "demucs-htdemucs",
+      name: "Demucs htdemucs (ONNX)",
+      purpose: "AI Stem Split — vocals / drums / bass / other",
+      url: "https://huggingface.co/spaces/abidlabs/music-separation/resolve/main/htdemucs.onnx",
+      filename: "htdemucs.onnx",
+      size_bytes: 83_000_000,
+      sha256: null,
+      license: "MIT",
+      status: "notinstalled",
+      local_path: null,
+      on_disk_bytes: null,
+    },
+    {
+      id: "silero-vad",
+      name: "Silero VAD",
+      purpose: "Smart silence detection — voice activity",
+      url: "https://github.com/snakers4/silero-vad/raw/master/files/silero_vad.onnx",
+      filename: "silero_vad.onnx",
+      size_bytes: 1_800_000,
+      sha256: null,
+      license: "MIT",
+      status: "notinstalled",
+      local_path: null,
+      on_disk_bytes: null,
+    },
+  ];
+}
+
+async function mockDownload(
+  id: string,
+  onProgress?: (p: DownloadProgress) => void
+) {
+  const total = 2_000_000;
+  for (let i = 0; i <= 20; i++) {
+    await new Promise((r) => setTimeout(r, 90));
+    onProgress?.({
+      id,
+      received: Math.round((total * i) / 20),
+      total,
+      done: i === 20,
+      error: null,
+    });
+  }
+}
 
 function mockMeta(path: string): AudioMeta {
   return {

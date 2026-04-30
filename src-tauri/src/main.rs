@@ -5,6 +5,7 @@ mod ai;
 mod error;
 
 use audio::{converter, decoder, silence};
+use tauri::AppHandle;
 
 #[tauri::command]
 async fn load_audio(path: String) -> Result<decoder::AudioMeta, String> {
@@ -30,10 +31,7 @@ async fn convert_audio(
 }
 
 #[tauri::command]
-async fn estimate_target_bitrate(
-    duration_secs: f64,
-    target_mb: f64,
-) -> Result<u32, String> {
+async fn estimate_target_bitrate(duration_secs: f64, target_mb: f64) -> Result<u32, String> {
     Ok(converter::estimate_bitrate(duration_secs, target_mb))
 }
 
@@ -51,6 +49,37 @@ async fn magic_link_extract(url: String) -> Result<ai::MagicLinkResult, String> 
     ai::magic_link_extract(&url).await.map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn list_models(app: AppHandle) -> Result<Vec<ai::models::ModelInfo>, String> {
+    ai::models::list(&app).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn download_model(app: AppHandle, id: String) -> Result<(), String> {
+    ai::models::download(app, id).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn delete_model(app: AppHandle, id: String) -> Result<(), String> {
+    ai::models::delete(app, id).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn models_dir(app: AppHandle) -> Result<String, String> {
+    ai::models::models_dir(&app)
+        .map(|p| p.to_string_lossy().to_string())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn run_ai(
+    app: AppHandle,
+    model_id: String,
+    input_path: String,
+) -> Result<ai::AiRunResult, String> {
+    ai::run_inference(&app, &model_id, &input_path).map_err(|e| e.to_string())
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -62,6 +91,11 @@ fn main() {
             estimate_target_bitrate,
             detect_silence,
             magic_link_extract,
+            list_models,
+            download_model,
+            delete_model,
+            models_dir,
+            run_ai,
         ])
         .run(tauri::generate_context!())
         .expect("yAudio failed to start");

@@ -20,9 +20,13 @@ yAudio는 클라우드 의존 없이 사용자의 로컬 리소스만으로 동�
 
 ### AI Intelligence (Local Only)
 - 🔗 **Magic Link** — `yt-dlp` 로컬 추출
-- ✨ **Noise Clean** — 화이트노이즈 / 주변 소음 제거
+- ✨ **Noise Clean** — 화이트노이즈 / 주변 소음 제거 (RNNoise ONNX)
 - 🎤 **Stem Split** — 보컬 / 반주 / 드럼 분리 (Demucs ONNX)
 - 🔇 **Silence Trim** — dB 임계값 기반 무음 자동 삭제
+
+> **모델 매니저**: 헤더의 `Cpu` 아이콘에서 모델을 다운로드/삭제할 수 있습니다.
+> 가중치는 사용자 기기의 `app_data_dir/models/`에만 저장되며, AI 도구를 누를 때
+> 모델이 없으면 매니저가 자동으로 열립니다.
 
 ---
 

@@ -1,4 +1,4 @@
-import { FolderOpen, Loader2 } from "lucide-react";
+import { Cpu, FolderOpen, Loader2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { tauri } from "../lib/tauri";
 import { useApp } from "../store/appStore";
@@ -11,6 +11,8 @@ interface Props {
 export function MainCanvas({ onOpenFile }: Props) {
   const tool = useApp((s) => s.tool);
   const waveform = useApp((s) => s.waveform);
+  const models = useApp((s) => s.models);
+  const openModelManager = useApp((s) => s.openModelManager);
   const setWaveform = useApp((s) => s.setWaveform);
   const cursor = useApp((s) => s.cursorSecs);
   const setCursor = useApp((s) => s.setCursor);
@@ -78,6 +80,7 @@ export function MainCanvas({ onOpenFile }: Props) {
   }
 
   if (!waveform) {
+    const noModels = models.length > 0 && models.every((m) => m.status !== "installed");
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-4 text-zinc-500">
         <button
@@ -91,6 +94,21 @@ export function MainCanvas({ onOpenFile }: Props) {
         <p className="font-mono text-xs text-zinc-600">
           MP3 · WAV · FLAC · OGG · AAC · M4A
         </p>
+        {noModels && (
+          <button
+            onClick={() => openModelManager(null)}
+            className="glass mt-4 flex max-w-md items-center gap-3 px-4 py-3 text-left text-xs hover:text-zinc-100"
+          >
+            <Cpu size={18} className="accent shrink-0" />
+            <span>
+              <span className="block text-zinc-300">AI 모델이 아직 설치되지 않았습니다</span>
+              <span className="block text-zinc-500">
+                노이즈 제거·음원 분리 등 AI 기능을 사용하려면 모델 매니저에서
+                다운로드하세요.
+              </span>
+            </span>
+          </button>
+        )}
       </div>
     );
   }

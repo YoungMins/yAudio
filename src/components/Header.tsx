@@ -1,5 +1,6 @@
 import {
   Coffee,
+  Cpu,
   Github,
   Moon,
   Pause,
@@ -8,6 +9,10 @@ import {
   Sun,
 } from "lucide-react";
 import { useApp } from "../store/appStore";
+
+interface HeaderProps {
+  onOpenModels: () => void;
+}
 
 const MENU = ["File", "Edit", "View", "Help"];
 
@@ -21,7 +26,7 @@ function formatTime(secs: number): string {
     .padStart(2, "0")}.${cs.toString().padStart(2, "0")}`;
 }
 
-export function Header() {
+export function Header({ onOpenModels }: HeaderProps) {
   const theme = useApp((s) => s.theme);
   const toggleTheme = useApp((s) => s.toggleTheme);
   const isPlaying = useApp((s) => s.isPlaying);
@@ -29,8 +34,11 @@ export function Header() {
   const cursor = useApp((s) => s.cursorSecs);
   const setCursor = useApp((s) => s.setCursor);
   const meta = useApp((s) => s.meta);
+  const models = useApp((s) => s.models);
 
   const duration = meta?.duration_secs ?? 0;
+  const installedCount = models.filter((m) => m.status === "installed").length;
+  const totalCount = models.length;
 
   return (
     <header className="flex h-12 items-center gap-4 border-b border-white/5 px-4">
@@ -81,6 +89,17 @@ export function Header() {
         </div>
 
         <div className="flex items-center gap-1">
+          <button
+            onClick={onOpenModels}
+            className="tool-btn flex items-center gap-1.5 px-2 text-xs"
+            title="AI Model Manager"
+            style={{ width: "auto" }}
+          >
+            <Cpu size={14} />
+            <span className="font-mono">
+              {totalCount > 0 ? `${installedCount}/${totalCount}` : "AI"}
+            </span>
+          </button>
           <a
             href="https://ko-fi.com/youngminkim"
             target="_blank"

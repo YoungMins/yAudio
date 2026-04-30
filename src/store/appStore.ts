@@ -1,5 +1,12 @@
 import { create } from "zustand";
-import type { AudioMeta, SilenceRange, Tool, WaveformPayload } from "../types/audio";
+import type {
+  AudioMeta,
+  DownloadProgress,
+  ModelInfo,
+  SilenceRange,
+  Tool,
+  WaveformPayload,
+} from "../types/audio";
 
 export type Theme = "dark" | "light";
 
@@ -34,6 +41,15 @@ interface AppState {
   effects: EffectLayer[];
   toggleEffect: (id: string) => void;
   addEffect: (name: string) => void;
+
+  models: ModelInfo[];
+  setModels: (m: ModelInfo[]) => void;
+  modelProgress: Record<string, DownloadProgress>;
+  setModelProgress: (p: DownloadProgress) => void;
+  modelManagerOpen: boolean;
+  openModelManager: (highlight?: string | null) => void;
+  closeModelManager: () => void;
+  highlightedModel: string | null;
 }
 
 export const useApp = create<AppState>((set) => ({
@@ -82,4 +98,16 @@ export const useApp = create<AppState>((set) => ({
         { id: `${Date.now()}`, name, enabled: true },
       ],
     })),
+
+  models: [],
+  setModels: (m) => set({ models: m }),
+  modelProgress: {},
+  setModelProgress: (p) =>
+    set((s) => ({ modelProgress: { ...s.modelProgress, [p.id]: p } })),
+  modelManagerOpen: false,
+  highlightedModel: null,
+  openModelManager: (highlight = null) =>
+    set({ modelManagerOpen: true, highlightedModel: highlight }),
+  closeModelManager: () =>
+    set({ modelManagerOpen: false, highlightedModel: null }),
 }));

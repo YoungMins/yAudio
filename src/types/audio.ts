@@ -27,3 +27,39 @@ export interface MagicLinkResult {
 export type AudioFormat = "mp3" | "wav" | "flac" | "ogg" | "aac" | "m4a";
 
 export type Tool = "select" | "cut" | "zoom";
+
+export type ModelStatus =
+  | "notinstalled"
+  | "downloading"
+  | "installed"
+  | "corrupted";
+
+export interface ModelInfo {
+  id: string;
+  name: string;
+  purpose: string;
+  url: string;
+  filename: string;
+  size_bytes: number;
+  sha256: string | null;
+  license: string;
+  status: ModelStatus;
+  local_path: string | null;
+  on_disk_bytes: number | null;
+}
+
+export interface DownloadProgress {
+  id: string;
+  received: number;
+  total: number;
+  done: boolean;
+  error: string | null;
+}
+
+/** Map AI feature → required model id. */
+export const MODEL_FOR_FEATURE = {
+  clean: "rnnoise",
+  split: "demucs-htdemucs",
+  vad: "silero-vad",
+} as const;
+export type AiFeature = keyof typeof MODEL_FOR_FEATURE;
