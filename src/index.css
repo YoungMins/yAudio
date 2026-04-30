@@ -1,0 +1,91 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --accent: #8b5cf6;
+    --bg: #0a0a0a;
+    --fg: #f4f4f5;
+    --panel: rgba(255, 255, 255, 0.04);
+    --border: rgba(255, 255, 255, 0.08);
+  }
+  :root.light {
+    --accent: #6d28d9;
+    --bg: #f9fafb;
+    --fg: #18181b;
+    --panel: rgba(0, 0, 0, 0.04);
+    --border: rgba(0, 0, 0, 0.08);
+  }
+  html,
+  body,
+  #root {
+    height: 100%;
+    margin: 0;
+  }
+  body {
+    font-family: "Inter", system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--fg);
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+  }
+  ::selection {
+    background: var(--accent);
+    color: #fff;
+  }
+}
+
+@layer components {
+  .glass {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+  }
+  .accent {
+    color: var(--accent);
+  }
+  .accent-bg {
+    background: var(--accent);
+  }
+  .tool-btn {
+    @apply flex h-10 w-10 items-center justify-center rounded-glass text-zinc-400 transition;
+  }
+  .tool-btn:hover {
+    color: var(--fg);
+    background: var(--panel);
+  }
+  .tool-btn.active {
+    color: #fff;
+    background: var(--accent);
+  }
+  .input {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 12px;
+    outline: none;
+    color: var(--fg);
+    width: 100%;
+  }
+  .input:focus {
+    border-color: var(--accent);
+  }
+  .btn-primary {
+    background: var(--accent);
+    color: #fff;
+    border-radius: 8px;
+    padding: 8px 16px;
+    font-weight: 500;
+    transition: opacity 0.15s;
+  }
+  .btn-primary:hover {
+    opacity: 0.9;
+  }
+  .btn-primary:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}

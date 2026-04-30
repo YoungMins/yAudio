@@ -1,0 +1,25 @@
+# dependencies
+node_modules
+.pnp
+.pnp.js
+
+# build
+dist
+dist-ssr
+.cache
+
+# Tauri
+src-tauri/target
+src-tauri/gen
+
+# env / local
+.env
+.env.local
+.env.*.local
+*.log
+.DS_Store
+
+# editor
+.vscode/*
+!.vscode/extensions.json
+.idea

@@ -1,0 +1,33 @@
+[package]
+name = "yaudio"
+version = "0.1.0"
+description = "yAudio — AI-Powered Open Source Sound Utility"
+authors = ["Youngmin Kim"]
+license = "MIT"
+edition = "2021"
+rust-version = "1.75"
+
+[build-dependencies]
+tauri-build = { version = "2.0", features = [] }
+
+[dependencies]
+tauri = { version = "2.0", features = [] }
+tauri-plugin-dialog = "2.0"
+tauri-plugin-shell = "2.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0"
+symphonia = { version = "0.5", features = ["all-codecs", "all-formats"] }
+hound = "3.5"
+rubato = "0.15"
+rayon = "1.10"
+
+[features]
+custom-protocol = ["tauri/custom-protocol"]
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+panic = "abort"
+strip = true
