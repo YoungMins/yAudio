@@ -10,6 +10,13 @@ serde = { version = "1.0", features = ["derive"] }
 thiserror = "1.0"
 symphonia = { version = "0.5", features = ["all-codecs", "all-formats"] }
 hound = "3.5"
+# ONNX Runtime is optional so `cargo test -p yaudio-core` stays fast
+# and doesn't need to download / link native runtime libs in CI.
+ort = { version = "2.0.0-rc.10", optional = true, default-features = false }
+
+[features]
+default = []
+onnx = ["dep:ort", "ort/load-dynamic", "ort/ndarray"]
 
 [dev-dependencies]
 # kept empty on purpose — pure-Rust tests only

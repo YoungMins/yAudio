@@ -63,19 +63,28 @@ pub struct AiRunResult {
     pub output_path: String,
 }
 
-/// Placeholder ONNX inference entrypoint. The real implementation will
-/// load `model_path` via `ort` (ONNX Runtime), feed audio frames, and
-/// write a processed WAV next to the input. For now this just verifies
-/// that the requested model is installed so the UI flow is end-to-end.
+/// Run an installed ONNX model over `input_path`'s audio and write the
+/// processed result next to the input. Falls back to a passthrough
+/// (file copy of the decoded mono PCM) when yaudio-core was built
+/// without the `onnx` feature, so the UI flow always completes.
 pub fn run_inference(
     app: &AppHandle,
     model_id: &str,
     input_path: &str,
 ) -> AudioResult<AiRunResult> {
     let model_path = models::require_installed(app, model_id)?;
-    let _ = model_path;
+    let (samples, meta) = yaudio_core::audio::decoder::decode_to_mono(input_path)?;
+    let processed = yaudio_core::ai::denoise(&samples, &model_path)?;
+
+    let output_path = format!("{input_path}.processed.wav");
+    yaudio_core::audio::render::write_wav(
+        std::path::Path::new(&output_path),
+        &processed,
+        meta.sample_rate,
+    )?;
+
     Ok(AiRunResult {
         model_id: model_id.to_string(),
-        output_path: format!("{input_path}.processed.wav"),
+        output_path,
     })
 }

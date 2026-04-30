@@ -74,6 +74,21 @@ npm run test:all      # 둘 다
 2. 가장 작은 변경으로 통과시킵니다.
 3. 리팩터링하고 모든 테스트가 여전히 통과하는지 확인합니다.
 
+## 🤖 ONNX Inference (옵션)
+
+기본 빌드는 ONNX Runtime을 포함하지 않습니다 (CI를 가볍게 유지). 실제 추론을
+사용하려면 `onnx` 피처를 켜서 빌드하세요. ORT 다이나믹 라이브러리는 `ort`
+크레이트의 `load-dynamic` 모드로 첫 실행 시 자동 다운로드됩니다.
+
+```bash
+cargo build -p yaudio --features onnx --release
+# 또는 Tauri:
+npm run tauri build -- --features onnx
+```
+
+피처가 꺼져 있으면 `run_ai`는 모델 파일이 설치돼 있는지만 확인하고 입력
+오디오를 그대로 출력으로 복사합니다 — UI 흐름은 끊기지 않습니다.
+
 ---
 
 ## 🗺 Roadmap
