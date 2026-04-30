@@ -6,6 +6,7 @@ import type {
   SilenceRange,
   WaveformPayload,
 } from "../types/audio";
+import { estimateBitrate } from "./format";
 
 type InvokeFn = <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
 
@@ -59,12 +60,7 @@ export const tauri = {
     invokeOrMock<number>(
       "estimate_target_bitrate",
       { durationSecs, targetMb },
-      () => {
-        if (durationSecs <= 0) return 128;
-        const bits = targetMb * 1024 * 1024 * 8 * 0.95;
-        const kbps = Math.round(bits / durationSecs / 1000);
-        return Math.max(32, Math.min(320, kbps));
-      }
+      () => estimateBitrate(durationSecs, targetMb)
     ),
 
   detectSilence: (path: string, thresholdDb: number, minDurationMs: number) =>

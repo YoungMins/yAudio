@@ -9,16 +9,10 @@ import {
   X,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { formatBytes } from "../lib/format";
 import { tauri } from "../lib/tauri";
 import { useApp } from "../store/appStore";
 import type { ModelInfo, ModelStatus } from "../types/audio";
-
-function formatBytes(n: number | null | undefined): string {
-  if (!n || n <= 0) return "—";
-  const mb = n / 1024 / 1024;
-  if (mb < 1) return `${(n / 1024).toFixed(0)} KB`;
-  return `${mb.toFixed(1)} MB`;
-}
 
 function StatusBadge({ status }: { status: ModelStatus }) {
   const map: Record<ModelStatus, { label: string; cls: string; icon: React.ReactNode }> = {

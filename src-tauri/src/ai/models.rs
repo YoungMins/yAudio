@@ -1,4 +1,4 @@
-use crate::error::{AudioError, AudioResult};
+use yaudio_core::error::{AudioError, AudioResult};
 use futures_util::StreamExt;
 use once_cell::sync::Lazy;
 use serde::Serialize;

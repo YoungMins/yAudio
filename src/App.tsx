@@ -5,6 +5,7 @@ import { MagicLinkDialog } from "./components/MagicLinkDialog";
 import { MagicToolbar } from "./components/MagicToolbar";
 import { MainCanvas } from "./components/MainCanvas";
 import { ModelManager } from "./components/ModelManager";
+import { modelForFeature } from "./lib/models";
 import { tauri } from "./lib/tauri";
 import { useApp } from "./store/appStore";
 import { MODEL_FOR_FEATURE, type AiFeature, type ModelInfo } from "./types/audio";
@@ -24,17 +25,13 @@ export default function App() {
     void tauri.listModels().then(setModels).catch(() => {});
   }, [setModels]);
 
-  function modelFor(feature: AiFeature): ModelInfo | undefined {
-    return models.find((m) => m.id === MODEL_FOR_FEATURE[feature]);
-  }
-
   async function ensureModel(feature: AiFeature): Promise<ModelInfo | null> {
     const id = MODEL_FOR_FEATURE[feature];
-    let m = modelFor(feature);
+    let m = modelForFeature(models, feature);
     if (!m) {
       const list = await tauri.listModels();
       setModels(list);
-      m = list.find((x) => x.id === id);
+      m = modelForFeature(list, feature);
     }
     if (!m || m.status !== "installed") {
       openModelManager(id);

@@ -4,7 +4,7 @@ use std::fs::File;
 use std::path::Path;
 use symphonia::core::audio::{AudioBufferRef, Signal};
 use symphonia::core::codecs::{DecoderOptions, CODEC_TYPE_NULL};
-use symphonia::core::formats::FormatOptions;
+use symphonia::core::formats::{FormatOptions, FormatReader};
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
@@ -27,7 +27,7 @@ pub struct WaveformPayload {
     pub bucket_count: usize,
 }
 
-fn open_format(path: &str) -> AudioResult<(symphonia::core::formats::FormatReader, usize)> {
+fn open_format(path: &str) -> AudioResult<(Box<dyn FormatReader>, usize)> {
     let file = File::open(path)?;
     let size = file.metadata()?.len();
     let mss = MediaSourceStream::new(Box::new(file), Default::default());

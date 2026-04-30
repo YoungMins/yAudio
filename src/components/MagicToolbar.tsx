@@ -1,6 +1,7 @@
 import { Link2, MousePointer2, Scissors, Sparkles, ZoomIn, Mic2 } from "lucide-react";
+import { isFeatureReady } from "../lib/models";
 import { useApp } from "../store/appStore";
-import { MODEL_FOR_FEATURE, type AiFeature, type Tool } from "../types/audio";
+import { type AiFeature, type Tool } from "../types/audio";
 
 interface Props {
   onMagicLink: () => void;
@@ -19,8 +20,7 @@ export function MagicToolbar({ onMagicLink, onClean, onSplit }: Props) {
   const setTool = useApp((s) => s.setTool);
   const models = useApp((s) => s.models);
 
-  const isReady = (feature: AiFeature) =>
-    models.find((m) => m.id === MODEL_FOR_FEATURE[feature])?.status === "installed";
+  const isReady = (feature: AiFeature) => isFeatureReady(models, feature);
 
   return (
     <aside className="flex w-14 shrink-0 flex-col items-center gap-2 border-r border-white/5 py-4">

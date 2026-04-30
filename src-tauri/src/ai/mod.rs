@@ -1,6 +1,6 @@
 pub mod models;
 
-use crate::error::{AudioError, AudioResult};
+use yaudio_core::error::{AudioError, AudioResult};
 use serde::Serialize;
 use std::env;
 use std::process::Command;

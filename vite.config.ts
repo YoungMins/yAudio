@@ -1,3 +1,4 @@
+/// <reference types="vitest" />
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
@@ -14,5 +15,10 @@ export default defineConfig({
     target: "esnext",
     minify: "esbuild",
     sourcemap: false,
+  },
+  test: {
+    environment: "jsdom",
+    globals: true,
+    include: ["src/**/*.{test,spec}.ts", "src/**/*.{test,spec}.tsx"],
   },
 });

@@ -8,9 +8,13 @@ dist
 dist-ssr
 .cache
 
-# Tauri
+# Tauri / Cargo
 src-tauri/target
 src-tauri/gen
+target
+
+# Vitest
+coverage
 
 # env / local
 .env

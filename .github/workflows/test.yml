@@ -1,0 +1,33 @@
+name: tests
+
+on:
+  push:
+    branches: [main, "claude/**"]
+  pull_request:
+    branches: [main]
+
+jobs:
+  frontend:
+    name: Vitest (frontend)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run test
+
+  core:
+    name: Cargo test (yaudio-core)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+      # yaudio-core is pure Rust and intentionally avoids the Tauri / GTK
+      # system deps so this job stays fast.
+      - run: cargo test -p yaudio-core --verbose

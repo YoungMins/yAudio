@@ -8,6 +8,8 @@ import {
   Square,
   Sun,
 } from "lucide-react";
+import { formatTime } from "../lib/format";
+import { modelInstallCounts } from "../lib/models";
 import { useApp } from "../store/appStore";
 
 interface HeaderProps {
@@ -15,16 +17,6 @@ interface HeaderProps {
 }
 
 const MENU = ["File", "Edit", "View", "Help"];
-
-function formatTime(secs: number): string {
-  if (!Number.isFinite(secs) || secs < 0) return "00:00.00";
-  const m = Math.floor(secs / 60);
-  const s = Math.floor(secs % 60);
-  const cs = Math.floor((secs - Math.floor(secs)) * 100);
-  return `${m.toString().padStart(2, "0")}:${s
-    .toString()
-    .padStart(2, "0")}.${cs.toString().padStart(2, "0")}`;
-}
 
 export function Header({ onOpenModels }: HeaderProps) {
   const theme = useApp((s) => s.theme);
@@ -37,8 +29,7 @@ export function Header({ onOpenModels }: HeaderProps) {
   const models = useApp((s) => s.models);
 
   const duration = meta?.duration_secs ?? 0;
-  const installedCount = models.filter((m) => m.status === "installed").length;
-  const totalCount = models.length;
+  const { installed: installedCount, total: totalCount } = modelInstallCounts(models);
 
   return (
     <header className="flex h-12 items-center gap-4 border-b border-white/5 px-4">

@@ -1,11 +1,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod audio;
 mod ai;
-mod error;
 
-use audio::{converter, decoder, silence};
 use tauri::AppHandle;
+use yaudio_core::audio::{converter, decoder, silence};
 
 #[tauri::command]
 async fn load_audio(path: String) -> Result<decoder::AudioMeta, String> {

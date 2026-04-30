@@ -51,6 +51,29 @@ npm run tauri dev      # 개발 모드
 npm run tauri build    # 프로덕션 번들
 ```
 
+## 🧪 Tests (TDD)
+
+이 프로젝트는 **테스트 주도 개발(TDD)** 을 따릅니다 — 실제 첫 적용에서
+`Timeline::delete_range`의 누락된 분기를 잡아냈습니다 (커밋 로그 참조).
+
+```bash
+npm run test          # Vitest (frontend pure logic)
+npm run test:rust     # cargo test -p yaudio-core (audio engine)
+npm run test:all      # 둘 다
+```
+
+**구조**
+- `crates/yaudio-core/` — 순수 Rust 코어 (디코더, 타임라인, 무음 감지,
+  비트레이트 추정). Tauri / GTK 의존성 없이 단독 테스트 가능.
+- `src-tauri/` — Tauri 바이너리. `yaudio-core`를 사용하고 AI 모델 매니저,
+  yt-dlp 통합, IPC 명령을 담당.
+- `src/` — React 프론트엔드. 순수 함수는 `src/lib/`에 모이고 거기서 테스트.
+
+**TDD 가이드**
+1. 새 동작은 먼저 실패하는 테스트(`#[test]` 또는 `it(...)`) 를 작성합니다.
+2. 가장 작은 변경으로 통과시킵니다.
+3. 리팩터링하고 모든 테스트가 여전히 통과하는지 확인합니다.
+
 ---
 
 ## 🗺 Roadmap

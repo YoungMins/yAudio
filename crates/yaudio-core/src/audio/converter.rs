@@ -80,3 +80,39 @@ pub fn estimate_bitrate(duration_secs: f64, target_mb: f64) -> u32 {
     let kbps = (target_bits / duration_secs / 1000.0).round() as i64;
     kbps.clamp(32, 320) as u32
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn invalid_inputs_fall_back_to_default() {
+        assert_eq!(estimate_bitrate(0.0, 5.0), 128);
+        assert_eq!(estimate_bitrate(-1.0, 5.0), 128);
+        assert_eq!(estimate_bitrate(60.0, 0.0), 128);
+        assert_eq!(estimate_bitrate(60.0, -2.0), 128);
+    }
+
+    #[test]
+    fn output_is_clamped_to_supported_range() {
+        // tiny target → clamp up to 32
+        assert_eq!(estimate_bitrate(3600.0, 0.5), 32);
+        // huge target → clamp down to 320
+        assert_eq!(estimate_bitrate(10.0, 1000.0), 320);
+    }
+
+    #[test]
+    fn sane_three_minute_three_megabyte_target_lands_in_128k_band() {
+        // 180s, 3MB, 5% overhead reserve → ~133 kbps
+        let kbps = estimate_bitrate(180.0, 3.0);
+        assert!((120..=160).contains(&kbps), "expected ~128–160, got {kbps}");
+    }
+
+    #[test]
+    fn doubling_target_doubles_bitrate_when_unclamped() {
+        let a = estimate_bitrate(300.0, 4.0) as i64;
+        let b = estimate_bitrate(300.0, 8.0) as i64;
+        // allow ±2 kbps rounding wiggle
+        assert!((b - a * 2).abs() <= 2, "a={a} b={b}");
+    }
+}
