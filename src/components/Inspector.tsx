@@ -1,4 +1,4 @@
-import { Layers, Power, Trash2, Volume2 } from "lucide-react";
+import { Layers, Power, Scissors, Trash2, Volume2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { tauri } from "../lib/tauri";
 import { useApp } from "../store/appStore";
@@ -12,6 +12,8 @@ export function Inspector() {
   const toggleEffect = useApp((s) => s.toggleEffect);
   const silences = useApp((s) => s.silences);
   const setSilences = useApp((s) => s.setSilences);
+  const clips = useApp((s) => s.clips);
+  const timeline = useApp((s) => s.timeline);
 
   const [targetMb, setTargetMb] = useState(3);
   const [estimatedKbps, setEstimatedKbps] = useState<number | null>(null);
@@ -54,6 +56,21 @@ export function Inspector() {
           </dl>
         ) : (
           <p className="text-xs text-zinc-500">로드된 파일이 없습니다.</p>
+        )}
+      </Section>
+
+      <Section title="Timeline" icon={<Scissors size={14} />}>
+        {meta ? (
+          <dl className="space-y-1 font-mono text-xs text-zinc-400">
+            <Row k="Clips" v={`${clips.length}`} />
+            <Row k="Edited length" v={`${timeline.duration.toFixed(2)}s`} />
+            <Row
+              k="Trimmed"
+              v={`${Math.max(0, meta.duration_secs - timeline.duration).toFixed(2)}s`}
+            />
+          </dl>
+        ) : (
+          <p className="text-xs text-zinc-500">파일을 열면 클립이 생성됩니다.</p>
         )}
       </Section>
 

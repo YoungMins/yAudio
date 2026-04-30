@@ -1,4 +1,4 @@
-import { Cpu, FolderOpen, Loader2 } from "lucide-react";
+import { Cpu, FolderOpen, Loader2, Redo2, Undo2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { tauri } from "../lib/tauri";
 import { useApp } from "../store/appStore";
@@ -19,10 +19,15 @@ export function MainCanvas({ onOpenFile }: Props) {
   const selection = useApp((s) => s.selection);
   const setSelection = useApp((s) => s.setSelection);
   const theme = useApp((s) => s.theme);
+  const clips = useApp((s) => s.clips);
+  const canUndo = useApp((s) => s.canUndo);
+  const canRedo = useApp((s) => s.canRedo);
+  const mutateTimeline = useApp((s) => s.mutateTimeline);
 
   const [loading, setLoading] = useState(false);
   const [zoom, setZoom] = useState(1);
   const containerRef = useRef<HTMLDivElement>(null);
+  const dragStartRef = useRef<number | null>(null);
 
   useEffect(() => {
     const onDrag = async (e: DragEvent) => {
@@ -31,8 +36,6 @@ export function MainCanvas({ onOpenFile }: Props) {
       if (!f) return;
       setLoading(true);
       try {
-        // In Tauri 2.x file drops expose absolute paths via the listen API;
-        // in browser preview we fall back to the File name (mock data).
         const path = (f as File & { path?: string }).path ?? f.name;
         const wf = await tauri.extractWaveform(path, 2_000);
         setWaveform(wf);
@@ -49,24 +52,72 @@ export function MainCanvas({ onOpenFile }: Props) {
     };
   }, [setWaveform]);
 
-  function handlePointer(e: React.PointerEvent<HTMLDivElement>) {
-    if (!waveform || !containerRef.current) return;
-    const rect = containerRef.current.getBoundingClientRect();
-    const ratio = (e.clientX - rect.left) / rect.width;
-    const dur = waveform.meta.duration_secs;
-    const pos = ratio * dur;
+  // Keyboard shortcuts: Cmd/Ctrl+Z (undo), shift variant (redo),
+  // Backspace/Delete (apply cut), Esc (clear selection).
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const target = e.target as HTMLElement | null;
+      if (target && ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) {
+        return;
+      }
+      const mod = e.metaKey || e.ctrlKey;
+      if (mod && e.key.toLowerCase() === "z") {
+        e.preventDefault();
+        mutateTimeline((t) => (e.shiftKey ? t.redo() : t.undo()));
+      } else if ((e.key === "Backspace" || e.key === "Delete") && selection) {
+        e.preventDefault();
+        mutateTimeline((t) => t.deleteRange(selection.start, selection.end));
+        setSelection(null);
+      } else if (e.key === "Escape") {
+        setSelection(null);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [mutateTimeline, selection, setSelection]);
+
+  function pointerToSecs(clientX: number): number {
+    const rect = containerRef.current!.getBoundingClientRect();
+    const ratio = (clientX - rect.left) / rect.width;
+    const dur = waveform!.meta.duration_secs;
+    return Math.max(0, Math.min(dur, ratio * dur));
+  }
+
+  function onPointerDown(e: React.PointerEvent<HTMLDivElement>) {
+    if (!waveform) return;
+    const pos = pointerToSecs(e.clientX);
 
     if (tool === "cut") {
-      const start = selection?.start ?? pos;
-      setSelection({
-        start: Math.min(start, pos),
-        end: Math.max(start, pos),
-      });
+      dragStartRef.current = pos;
+      setSelection({ start: pos, end: pos });
+      (e.target as Element).setPointerCapture(e.pointerId);
     } else if (tool === "zoom") {
       setZoom((z) => Math.min(16, z * 1.5));
     } else {
-      setCursor(Math.max(0, Math.min(dur, pos)));
+      setCursor(pos);
     }
+  }
+
+  function onPointerMove(e: React.PointerEvent<HTMLDivElement>) {
+    if (!waveform || dragStartRef.current === null) return;
+    const pos = pointerToSecs(e.clientX);
+    const start = Math.min(dragStartRef.current, pos);
+    const end = Math.max(dragStartRef.current, pos);
+    setSelection({ start, end });
+  }
+
+  function onPointerUp() {
+    if (dragStartRef.current === null) return;
+    dragStartRef.current = null;
+    if (selection && Math.abs(selection.end - selection.start) < 1e-3) {
+      setSelection(null);
+    }
+  }
+
+  function applyCut() {
+    if (!selection) return;
+    mutateTimeline((t) => t.deleteRange(selection.start, selection.end));
+    setSelection(null);
   }
 
   const accent = theme === "dark" ? "#8B5CF6" : "#6D28D9";
@@ -118,14 +169,44 @@ export function MainCanvas({ onOpenFile }: Props) {
       <div className="flex h-8 items-center gap-3 border-b border-white/5 px-4 text-xs text-zinc-500">
         <span>Tool: <span className="accent uppercase">{tool}</span></span>
         <span>Zoom: ×{zoom.toFixed(1)}</span>
-        <span className="ml-auto font-mono">
-          {waveform.meta.sample_rate} Hz · {waveform.meta.channels}ch
-        </span>
+        <span>Clips: {clips.length}</span>
+        <div className="ml-auto flex items-center gap-1">
+          <button
+            onClick={() => mutateTimeline((t) => t.undo())}
+            disabled={!canUndo}
+            className="tool-btn h-7 w-7 disabled:opacity-30"
+            title="Undo (⌘Z)"
+          >
+            <Undo2 size={13} />
+          </button>
+          <button
+            onClick={() => mutateTimeline((t) => t.redo())}
+            disabled={!canRedo}
+            className="tool-btn h-7 w-7 disabled:opacity-30"
+            title="Redo (⇧⌘Z)"
+          >
+            <Redo2 size={13} />
+          </button>
+          {selection && tool === "cut" && (
+            <button
+              onClick={applyCut}
+              className="btn-primary ml-2 h-7 px-3 text-[11px]"
+              title="Cut selection (Backspace)"
+            >
+              Cut
+            </button>
+          )}
+          <span className="ml-3 font-mono">
+            {waveform.meta.sample_rate} Hz · {waveform.meta.channels}ch
+          </span>
+        </div>
       </div>
 
       <div
         ref={containerRef}
-        onPointerDown={handlePointer}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
         className="relative flex-1 overflow-hidden"
         style={{ cursor: tool === "cut" ? "crosshair" : "pointer" }}
       >
@@ -133,14 +214,15 @@ export function MainCanvas({ onOpenFile }: Props) {
           waveform={waveform}
           cursorSecs={cursor}
           selection={selection}
+          clips={clips}
           accent={accent}
         />
       </div>
 
       <div className="h-7 border-t border-white/5 px-4 text-xs leading-7 text-zinc-500">
         {selection
-          ? `Selection: ${selection.start.toFixed(2)}s → ${selection.end.toFixed(2)}s (${(selection.end - selection.start).toFixed(2)}s)`
-          : "No selection"}
+          ? `Selection: ${selection.start.toFixed(2)}s → ${selection.end.toFixed(2)}s (${(selection.end - selection.start).toFixed(2)}s) — Backspace to cut`
+          : `${clips.length} clip${clips.length === 1 ? "" : "s"} on timeline`}
       </div>
     </div>
   );

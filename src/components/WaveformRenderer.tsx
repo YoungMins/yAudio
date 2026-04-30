@@ -1,10 +1,12 @@
 import { useEffect, useRef } from "react";
+import type { Clip } from "../lib/timeline";
 import type { WaveformPayload } from "../types/audio";
 
 interface Props {
   waveform: WaveformPayload;
   cursorSecs: number;
   selection: { start: number; end: number } | null;
+  clips: readonly Clip[];
   accent: string;
 }
 
@@ -17,6 +19,7 @@ export function WaveformRenderer({
   waveform,
   cursorSecs,
   selection,
+  clips,
   accent,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -61,7 +64,7 @@ export function WaveformRenderer({
   useEffect(() => {
     paintOverlay();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cursorSecs, selection, waveform]);
+  }, [cursorSecs, selection, waveform, clips]);
 
   function paint() {
     const canvas = canvasRef.current;
@@ -84,15 +87,31 @@ export function WaveformRenderer({
     if (!ctx) return;
     ctx.clearRect(0, 0, ov.width, ov.height);
     const dur = waveform.meta.duration_secs || 1;
+    const trackTop = ov.height - 18;
+
+    // Clip lane along the bottom of the canvas. Each clip is a small
+    // rounded rectangle so the user can see how the timeline has been cut.
+    if (clips.length > 0) {
+      ctx.fillStyle = `${accent}22`;
+      ctx.fillRect(0, trackTop, ov.width, 18);
+      for (const clip of clips) {
+        const x0 = (clip.start / dur) * ov.width;
+        const x1 = ((clip.start + clip.duration) / dur) * ov.width;
+        const w = Math.max(2, x1 - x0);
+        ctx.fillStyle = accent;
+        roundRect(ctx, x0 + 1, trackTop + 3, w - 2, 12, 3);
+        ctx.fill();
+      }
+    }
 
     if (selection) {
       const x0 = (selection.start / dur) * ov.width;
       const x1 = (selection.end / dur) * ov.width;
       ctx.fillStyle = `${accent}33`;
-      ctx.fillRect(x0, 0, x1 - x0, ov.height);
+      ctx.fillRect(x0, 0, x1 - x0, trackTop);
       ctx.strokeStyle = accent;
       ctx.lineWidth = 1;
-      ctx.strokeRect(x0 + 0.5, 0.5, x1 - x0 - 1, ov.height - 1);
+      ctx.strokeRect(x0 + 0.5, 0.5, x1 - x0 - 1, trackTop - 1);
     }
 
     const cx = (cursorSecs / dur) * ov.width;
@@ -100,8 +119,26 @@ export function WaveformRenderer({
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.moveTo(cx, 0);
-    ctx.lineTo(cx, ov.height);
+    ctx.lineTo(cx, trackTop);
     ctx.stroke();
+  }
+
+  function roundRect(
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    r: number
+  ) {
+    const rr = Math.min(r, w / 2, h / 2);
+    ctx.beginPath();
+    ctx.moveTo(x + rr, y);
+    ctx.arcTo(x + w, y, x + w, y + h, rr);
+    ctx.arcTo(x + w, y + h, x, y + h, rr);
+    ctx.arcTo(x, y + h, x, y, rr);
+    ctx.arcTo(x, y, x + w, y, rr);
+    ctx.closePath();
   }
 
   return (

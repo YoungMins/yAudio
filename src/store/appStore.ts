@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { Timeline, type Clip } from "../lib/timeline";
 import type {
   AudioMeta,
   DownloadProgress,
@@ -31,6 +32,17 @@ interface AppState {
   meta: AudioMeta | null;
   waveform: WaveformPayload | null;
   setWaveform: (w: WaveformPayload | null) => void;
+
+  timeline: Timeline;
+  /** Bumps every time the timeline mutates so React re-renders. */
+  timelineRev: number;
+  clips: readonly Clip[];
+  canUndo: boolean;
+  canRedo: boolean;
+  clipboard: Clip[];
+  /** Run a Timeline mutation and refresh derived state in one go. */
+  mutateTimeline: (f: (t: Timeline) => void) => void;
+  resetTimeline: () => void;
 
   selection: { start: number; end: number } | null;
   setSelection: (s: { start: number; end: number } | null) => void;
@@ -73,7 +85,57 @@ export const useApp = create<AppState>((set) => ({
 
   meta: null,
   waveform: null,
-  setWaveform: (w) => set({ waveform: w, meta: w?.meta ?? null }),
+  setWaveform: (w) =>
+    set((s) => {
+      // Loading a new file resets the timeline to a single clip covering it.
+      const meta = w?.meta ?? null;
+      s.timeline.reset();
+      if (meta) {
+        s.timeline.add({
+          sourcePath: meta.path,
+          start: 0,
+          duration: meta.duration_secs,
+          sourceOffset: 0,
+        });
+      }
+      return {
+        waveform: w,
+        meta,
+        timelineRev: s.timelineRev + 1,
+        clips: [...s.timeline.clips],
+        canUndo: s.timeline.canUndo,
+        canRedo: s.timeline.canRedo,
+        selection: null,
+        cursorSecs: 0,
+      };
+    }),
+
+  timeline: new Timeline(),
+  timelineRev: 0,
+  clips: [],
+  canUndo: false,
+  canRedo: false,
+  clipboard: [],
+  mutateTimeline: (f) =>
+    set((s) => {
+      f(s.timeline);
+      return {
+        timelineRev: s.timelineRev + 1,
+        clips: [...s.timeline.clips],
+        canUndo: s.timeline.canUndo,
+        canRedo: s.timeline.canRedo,
+      };
+    }),
+  resetTimeline: () =>
+    set((s) => {
+      s.timeline.reset();
+      return {
+        timelineRev: s.timelineRev + 1,
+        clips: [],
+        canUndo: false,
+        canRedo: false,
+      };
+    }),
 
   selection: null,
   setSelection: (s) => set({ selection: s }),
