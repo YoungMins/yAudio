@@ -219,6 +219,104 @@ impl Timeline {
         }
     }
 
+    pub fn find(&self, id: u64) -> Option<&Clip> {
+        self.clips.iter().find(|c| c.id == id)
+    }
+
+    /// Build a timeline from a previously serialized clip list (e.g. the
+    /// frontend handing its current state to the export command).
+    pub fn from_clips(clips: Vec<Clip>) -> Self {
+        let next_id = clips.iter().map(|c| c.id).max().unwrap_or(0);
+        let mut clips = clips;
+        clips.sort_by(|a, b| a.start.total_cmp(&b.start));
+        Self {
+            clips,
+            next_id,
+            history: Vec::new(),
+            future: Vec::new(),
+        }
+    }
+
+    /// Trim the start edge of clip `id` to `new_start`. Advancing the start
+    /// hides earlier source material; pulling it back exposes more, clamped
+    /// so `source_offset` cannot go below 0.
+    pub fn trim_start(&mut self, id: u64, new_start: f64) -> bool {
+        let Some(idx) = self.clips.iter().position(|c| c.id == id) else {
+            return false;
+        };
+        let clip = &self.clips[idx];
+        let delta = new_start - clip.start;
+        let bounded_delta = delta.max(-clip.source_offset);
+        if (clip.duration - bounded_delta) <= 0.0 {
+            return false;
+        }
+        self.snapshot();
+        let c = &mut self.clips[idx];
+        c.start += bounded_delta;
+        c.duration -= bounded_delta;
+        c.source_offset += bounded_delta;
+        self.clips.sort_by(|a, b| a.start.total_cmp(&b.start));
+        true
+    }
+
+    /// Trim the end edge of clip `id`. New end must remain greater than
+    /// the clip's start, otherwise the operation is rejected.
+    pub fn trim_end(&mut self, id: u64, new_end: f64) -> bool {
+        let Some(idx) = self.clips.iter().position(|c| c.id == id) else {
+            return false;
+        };
+        let start = self.clips[idx].start;
+        if new_end <= start {
+            return false;
+        }
+        self.snapshot();
+        self.clips[idx].duration = new_end - start;
+        true
+    }
+
+    /// Move clip `id` to a new start time without changing its source offset.
+    pub fn move_clip(&mut self, id: u64, new_start: f64) -> bool {
+        let Some(idx) = self.clips.iter().position(|c| c.id == id) else {
+            return false;
+        };
+        if new_start < 0.0 {
+            return false;
+        }
+        if (self.clips[idx].start - new_start).abs() < 1e-9 {
+            return false;
+        }
+        self.snapshot();
+        self.clips[idx].start = new_start;
+        self.clips.sort_by(|a, b| a.start.total_cmp(&b.start));
+        true
+    }
+
+    pub fn set_fade_in(&mut self, id: u64, secs: f64) -> bool {
+        let Some(idx) = self.clips.iter().position(|c| c.id == id) else {
+            return false;
+        };
+        let clamped = secs.clamp(0.0, self.clips[idx].duration);
+        if (self.clips[idx].fade_in - clamped).abs() < 1e-9 {
+            return false;
+        }
+        self.snapshot();
+        self.clips[idx].fade_in = clamped;
+        true
+    }
+
+    pub fn set_fade_out(&mut self, id: u64, secs: f64) -> bool {
+        let Some(idx) = self.clips.iter().position(|c| c.id == id) else {
+            return false;
+        };
+        let clamped = secs.clamp(0.0, self.clips[idx].duration);
+        if (self.clips[idx].fade_out - clamped).abs() < 1e-9 {
+            return false;
+        }
+        self.snapshot();
+        self.clips[idx].fade_out = clamped;
+        true
+    }
+
     pub fn undo(&mut self) -> bool {
         if let Some(prev) = self.history.pop() {
             self.future.push(std::mem::replace(&mut self.clips, prev));
@@ -373,6 +471,101 @@ mod tests {
         let mut t = Timeline::new();
         assert!(!t.undo());
         assert!(!t.redo());
+    }
+
+    #[test]
+    fn trim_start_advances_source_offset_and_shrinks_duration() {
+        let mut t = Timeline::new();
+        let id = t.add("a", 0.0, 4.0, 0.0);
+        assert!(t.trim_start(id, 1.0));
+        let c = t.find(id).unwrap();
+        assert!((c.start - 1.0).abs() < 1e-9);
+        assert!((c.duration - 3.0).abs() < 1e-9);
+        assert!((c.source_offset - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn trim_start_clamps_so_source_offset_stays_non_negative() {
+        let mut t = Timeline::new();
+        let id = t.add("a", 5.0, 2.0, 1.0);
+        // try to pull start back to 0 (delta = -5); should clamp to delta = -1
+        assert!(t.trim_start(id, 0.0));
+        let c = t.find(id).unwrap();
+        assert!((c.source_offset - 0.0).abs() < 1e-9);
+        assert!((c.start - 4.0).abs() < 1e-9);
+        assert!((c.duration - 3.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn trim_start_rejects_zero_or_negative_duration() {
+        let mut t = Timeline::new();
+        let id = t.add("a", 0.0, 2.0, 0.0);
+        assert!(!t.trim_start(id, 2.0));
+        assert!(!t.trim_start(id, 3.0));
+    }
+
+    #[test]
+    fn trim_end_only_changes_duration() {
+        let mut t = Timeline::new();
+        let id = t.add("a", 1.0, 4.0, 0.5);
+        assert!(t.trim_end(id, 3.0));
+        let c = t.find(id).unwrap();
+        assert!((c.start - 1.0).abs() < 1e-9);
+        assert!((c.duration - 2.0).abs() < 1e-9);
+        assert!((c.source_offset - 0.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn trim_end_rejects_when_smaller_than_start() {
+        let mut t = Timeline::new();
+        let id = t.add("a", 1.0, 4.0, 0.0);
+        assert!(!t.trim_end(id, 0.5));
+    }
+
+    #[test]
+    fn move_clip_changes_start_only() {
+        let mut t = Timeline::new();
+        let id = t.add("a", 1.0, 2.0, 0.7);
+        assert!(t.move_clip(id, 5.0));
+        let c = t.find(id).unwrap();
+        assert!((c.start - 5.0).abs() < 1e-9);
+        assert!((c.source_offset - 0.7).abs() < 1e-9);
+    }
+
+    #[test]
+    fn move_clip_keeps_clips_sorted() {
+        let mut t = Timeline::new();
+        t.add("a", 0.0, 1.0, 0.0);
+        let id = t.add("a", 5.0, 1.0, 0.0);
+        t.move_clip(id, 0.5);
+        let starts: Vec<f64> = t.clips().iter().map(|c| c.start).collect();
+        assert_eq!(starts, vec![0.0, 0.5]);
+    }
+
+    #[test]
+    fn fade_setters_clamp_to_clip_duration() {
+        let mut t = Timeline::new();
+        let id = t.add("a", 0.0, 2.0, 0.0);
+        // overlong fade is clamped to clip duration
+        assert!(t.set_fade_in(id, 5.0));
+        assert!((t.find(id).unwrap().fade_in - 2.0).abs() < 1e-9);
+        // negative fade clamps to 0; since fade_out was already 0 the op
+        // is a no-op (false return), which we treat as success here
+        let _ = t.set_fade_out(id, -1.0);
+        assert!((t.find(id).unwrap().fade_out - 0.0).abs() < 1e-9);
+        // shrinking a non-zero fade does mutate
+        assert!(t.set_fade_in(id, 0.5));
+        assert!((t.find(id).unwrap().fade_in - 0.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn ops_targeting_unknown_id_return_false() {
+        let mut t = Timeline::new();
+        assert!(!t.trim_start(42, 1.0));
+        assert!(!t.trim_end(42, 1.0));
+        assert!(!t.move_clip(42, 1.0));
+        assert!(!t.set_fade_in(42, 0.5));
+        assert!(!t.set_fade_out(42, 0.5));
     }
 
     #[test]

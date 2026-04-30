@@ -3,7 +3,7 @@
 mod ai;
 
 use tauri::AppHandle;
-use yaudio_core::audio::{converter, decoder, silence};
+use yaudio_core::audio::{converter, decoder, editor, render, silence};
 
 #[tauri::command]
 async fn load_audio(path: String) -> Result<decoder::AudioMeta, String> {
@@ -69,6 +69,33 @@ fn models_dir(app: AppHandle) -> Result<String, String> {
         .map_err(|e| e.to_string())
 }
 
+/// Render a timeline (sent as a serialized clip list from the frontend)
+/// to a WAV file at `output`. If `convert_to` is set, runs ffmpeg to
+/// transcode into the target format with optional bitrate.
+#[tauri::command]
+async fn export_timeline(
+    clips: Vec<editor::Clip>,
+    output: String,
+    convert_to: Option<String>,
+    bitrate_kbps: Option<u32>,
+) -> Result<String, String> {
+    let timeline = editor::Timeline::from_clips(clips);
+    let wav_path = if convert_to.is_some() {
+        format!("{output}.intermediate.wav")
+    } else {
+        output.clone()
+    };
+    render::render_timeline_to_wav(&timeline, std::path::Path::new(&wav_path))
+        .map_err(|e| e.to_string())?;
+
+    if let Some(fmt) = convert_to {
+        converter::convert(&wav_path, &output, &fmt, bitrate_kbps)
+            .map_err(|e| e.to_string())?;
+        let _ = std::fs::remove_file(&wav_path);
+    }
+    Ok(output)
+}
+
 #[tauri::command]
 fn run_ai(
     app: AppHandle,
@@ -94,6 +121,7 @@ fn main() {
             delete_model,
             models_dir,
             run_ai,
+            export_timeline,
         ])
         .run(tauri::generate_context!())
         .expect("yAudio failed to start");

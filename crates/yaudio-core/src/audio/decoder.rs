@@ -80,8 +80,10 @@ pub fn load_metadata(path: &str) -> AudioResult<AudioMeta> {
     })
 }
 
-/// Decode the entire file and produce a min/max envelope waveform of `target_points` buckets.
-pub fn extract_waveform(path: &str, target_points: usize) -> AudioResult<WaveformPayload> {
+/// Decode every audio packet in `path` into mono f32 samples at the
+/// source's native sample rate. Used both for waveform extraction and
+/// the render pipeline's `SymphoniaSource`.
+pub fn decode_to_mono(path: &str) -> AudioResult<(Vec<f32>, AudioMeta)> {
     let meta = load_metadata(path)?;
     let (mut format, _) = open_format(path)?;
     let track = format.default_track().ok_or(AudioError::NoTrack)?;
@@ -91,7 +93,6 @@ pub fn extract_waveform(path: &str, target_points: usize) -> AudioResult<Wavefor
         symphonia::default::get_codecs().make(&track.codec_params, &DecoderOptions::default())?;
 
     let mut samples: Vec<f32> = Vec::with_capacity(1_024 * 1_024);
-
     loop {
         let packet = match format.next_packet() {
             Ok(p) => p,
@@ -105,15 +106,19 @@ pub fn extract_waveform(path: &str, target_points: usize) -> AudioResult<Wavefor
         if packet.track_id() != track_id {
             continue;
         }
-
         let decoded = match decoder.decode(&packet) {
             Ok(d) => d,
             Err(symphonia::core::errors::Error::DecodeError(_)) => continue,
             Err(e) => return Err(e.into()),
         };
-
         accumulate_mono(&decoded, &mut samples);
     }
+    Ok((samples, meta))
+}
+
+/// Decode the entire file and produce a min/max envelope waveform of `target_points` buckets.
+pub fn extract_waveform(path: &str, target_points: usize) -> AudioResult<WaveformPayload> {
+    let (samples, meta) = decode_to_mono(path)?;
 
     let buckets = target_points.max(1);
     let mut peaks = vec![0.0f32; buckets * 2];

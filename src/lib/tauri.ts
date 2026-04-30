@@ -110,7 +110,34 @@ export const tauri = {
       { modelId, inputPath },
       () => ({ model_id: modelId, output_path: `${inputPath}.processed.wav` })
     ),
+
+  exportTimeline: (
+    clips: ExportClip[],
+    output: string,
+    convertTo?: string,
+    bitrateKbps?: number
+  ) =>
+    invokeOrMock<string>(
+      "export_timeline",
+      { clips, output, convertTo, bitrateKbps },
+      () => output
+    ),
 };
+
+/**
+ * Wire-format expected by `export_timeline`. Mirrors `yaudio_core::Clip`
+ * (snake_case) since serde uses field names verbatim.
+ */
+export interface ExportClip {
+  id: number;
+  source_path: string;
+  start: number;
+  duration: number;
+  source_offset: number;
+  fade_in: number;
+  fade_out: number;
+  gain_db: number;
+}
 
 function mockModels(): ModelInfo[] {
   return [

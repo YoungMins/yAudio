@@ -129,6 +129,74 @@ describe("Timeline — undo / redo", () => {
   });
 });
 
+describe("Timeline — clip ops (trim/move/fade)", () => {
+  it("trimStart advances source offset and shrinks duration", () => {
+    const t = new Timeline();
+    const id = t.add({ sourcePath: "a", start: 0, duration: 4, sourceOffset: 0 });
+    expect(t.trimStart(id, 1)).toBe(true);
+    const c = t.find(id)!;
+    expect(c.start).toBeCloseTo(1);
+    expect(c.duration).toBeCloseTo(3);
+    expect(c.sourceOffset).toBeCloseTo(1);
+  });
+
+  it("trimStart clamps so sourceOffset never goes negative", () => {
+    const t = new Timeline();
+    const id = t.add({ sourcePath: "a", start: 5, duration: 2, sourceOffset: 1 });
+    t.trimStart(id, 0); // would need delta=-5 but only -1 is available
+    const c = t.find(id)!;
+    expect(c.sourceOffset).toBeCloseTo(0);
+    expect(c.start).toBeCloseTo(4);
+    expect(c.duration).toBeCloseTo(3);
+  });
+
+  it("trimEnd only changes duration", () => {
+    const t = new Timeline();
+    const id = t.add({ sourcePath: "a", start: 1, duration: 4, sourceOffset: 0.5 });
+    expect(t.trimEnd(id, 3)).toBe(true);
+    const c = t.find(id)!;
+    expect(c.start).toBeCloseTo(1);
+    expect(c.duration).toBeCloseTo(2);
+    expect(c.sourceOffset).toBeCloseTo(0.5);
+  });
+
+  it("moveClip changes start without touching sourceOffset", () => {
+    const t = new Timeline();
+    const id = t.add({ sourcePath: "a", start: 1, duration: 2, sourceOffset: 0.7 });
+    expect(t.moveClip(id, 5)).toBe(true);
+    expect(t.find(id)!.start).toBeCloseTo(5);
+    expect(t.find(id)!.sourceOffset).toBeCloseTo(0.7);
+  });
+
+  it("setFadeIn / setFadeOut clamp to clip duration", () => {
+    const t = new Timeline();
+    const id = t.add({ sourcePath: "a", start: 0, duration: 2, sourceOffset: 0 });
+    t.setFadeIn(id, 5);
+    expect(t.find(id)!.fadeIn).toBeCloseTo(2);
+  });
+
+  it("ops targeting an unknown id return false", () => {
+    const t = new Timeline();
+    expect(t.trimStart(42, 1)).toBe(false);
+    expect(t.trimEnd(42, 1)).toBe(false);
+    expect(t.moveClip(42, 1)).toBe(false);
+    expect(t.setFadeIn(42, 1)).toBe(false);
+    expect(t.setFadeOut(42, 1)).toBe(false);
+  });
+
+  it("trim and move operations are individually undoable", () => {
+    const t = new Timeline();
+    const id = t.add({ sourcePath: "a", start: 0, duration: 4, sourceOffset: 0 });
+    t.trimStart(id, 1);
+    t.trimEnd(id, 3);
+    expect(t.find(id)!.duration).toBeCloseTo(2);
+    t.undo();
+    expect(t.find(id)!.duration).toBeCloseTo(3);
+    t.undo();
+    expect(t.find(id)!.duration).toBeCloseTo(4);
+  });
+});
+
 describe("Timeline — crossfade", () => {
   it("marks fade_out on the left and fade_in on the right", () => {
     const t = tlWith([

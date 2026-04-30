@@ -29,6 +29,20 @@ export interface ClipSpec {
 
 export const clipEnd = (c: Clip): number => c.start + c.duration;
 
+/** Convert a frontend Clip into the snake_case shape Rust expects. */
+export function toExportClip(c: Clip) {
+  return {
+    id: c.id,
+    source_path: c.sourcePath,
+    start: c.start,
+    duration: c.duration,
+    source_offset: c.sourceOffset,
+    fade_in: c.fadeIn,
+    fade_out: c.fadeOut,
+    gain_db: c.gainDb,
+  };
+}
+
 export class Timeline {
   private _clips: Clip[] = [];
   private nextId = 0;
@@ -187,6 +201,69 @@ export class Timeline {
       if (Math.abs(c.start - time) <= half + eps) next.fadeIn = duration;
       return next;
     });
+  }
+
+  find(id: number): Clip | undefined {
+    return this._clips.find((c) => c.id === id);
+  }
+
+  trimStart(id: number, newStart: number): boolean {
+    const idx = this._clips.findIndex((c) => c.id === id);
+    if (idx < 0) return false;
+    const clip = this._clips[idx];
+    const delta = newStart - clip.start;
+    const bounded = Math.max(delta, -clip.sourceOffset);
+    if (clip.duration - bounded <= 0) return false;
+    if (Math.abs(bounded) < 1e-9) return false;
+    this.snapshot();
+    const c = this._clips[idx];
+    c.start += bounded;
+    c.duration -= bounded;
+    c.sourceOffset += bounded;
+    this.sort();
+    return true;
+  }
+
+  trimEnd(id: number, newEnd: number): boolean {
+    const idx = this._clips.findIndex((c) => c.id === id);
+    if (idx < 0) return false;
+    const start = this._clips[idx].start;
+    if (newEnd <= start) return false;
+    if (Math.abs(this._clips[idx].duration - (newEnd - start)) < 1e-9) return false;
+    this.snapshot();
+    this._clips[idx].duration = newEnd - start;
+    return true;
+  }
+
+  moveClip(id: number, newStart: number): boolean {
+    const idx = this._clips.findIndex((c) => c.id === id);
+    if (idx < 0) return false;
+    if (newStart < 0) return false;
+    if (Math.abs(this._clips[idx].start - newStart) < 1e-9) return false;
+    this.snapshot();
+    this._clips[idx].start = newStart;
+    this.sort();
+    return true;
+  }
+
+  setFadeIn(id: number, secs: number): boolean {
+    const idx = this._clips.findIndex((c) => c.id === id);
+    if (idx < 0) return false;
+    const clamped = Math.max(0, Math.min(this._clips[idx].duration, secs));
+    if (Math.abs(this._clips[idx].fadeIn - clamped) < 1e-9) return false;
+    this.snapshot();
+    this._clips[idx].fadeIn = clamped;
+    return true;
+  }
+
+  setFadeOut(id: number, secs: number): boolean {
+    const idx = this._clips.findIndex((c) => c.id === id);
+    if (idx < 0) return false;
+    const clamped = Math.max(0, Math.min(this._clips[idx].duration, secs));
+    if (Math.abs(this._clips[idx].fadeOut - clamped) < 1e-9) return false;
+    this.snapshot();
+    this._clips[idx].fadeOut = clamped;
+    return true;
   }
 
   undo(): boolean {

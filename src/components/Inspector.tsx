@@ -1,6 +1,7 @@
-import { Layers, Power, Scissors, Trash2, Volume2 } from "lucide-react";
+import { Layers, Loader2, Power, Scissors, Trash2, Volume2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { tauri } from "../lib/tauri";
+import { toExportClip } from "../lib/timeline";
 import { useApp } from "../store/appStore";
 import type { AudioFormat } from "../types/audio";
 
@@ -20,6 +21,8 @@ export function Inspector() {
   const [format, setFormat] = useState<AudioFormat>("mp3");
   const [silenceDb, setSilenceDb] = useState(-40);
   const [silenceMs, setSilenceMs] = useState(500);
+  const [exporting, setExporting] = useState(false);
+  const [exportMsg, setExportMsg] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -42,6 +45,40 @@ export function Inspector() {
     if (!meta) return;
     const ranges = await tauri.detectSilence(meta.path, silenceDb, silenceMs);
     setSilences(ranges);
+  }
+
+  async function runExport() {
+    if (!meta || clips.length === 0) return;
+    setExporting(true);
+    setExportMsg(null);
+    try {
+      let outPath = `${meta.path.replace(/\.[^/.]+$/, "")}.export.${format}`;
+      try {
+        const dialog = await import("@tauri-apps/plugin-dialog");
+        const picked = await dialog.save({
+          defaultPath: outPath,
+          filters: [{ name: format.toUpperCase(), extensions: [format] }],
+        });
+        if (typeof picked === "string") outPath = picked;
+        else {
+          setExporting(false);
+          return;
+        }
+      } catch {
+        // browser preview: just keep the synthetic path
+      }
+      const result = await tauri.exportTimeline(
+        clips.map(toExportClip),
+        outPath,
+        format === "wav" ? undefined : format,
+        estimatedKbps ?? undefined
+      );
+      setExportMsg(`✓ ${result}`);
+    } catch (e) {
+      setExportMsg(e instanceof Error ? e.message : String(e));
+    } finally {
+      setExporting(false);
+    }
   }
 
   return (
@@ -107,12 +144,22 @@ export function Inspector() {
             ))}
           </select>
           <button
-            disabled={!meta}
-            className="btn-primary w-full text-sm"
-            onClick={() => alert(`Convert → ${format.toUpperCase()} @ ${estimatedKbps ?? "—"} kbps`)}
+            disabled={!meta || exporting || clips.length === 0}
+            className="btn-primary flex w-full items-center justify-center gap-2 text-sm"
+            onClick={runExport}
           >
-            Export
+            {exporting && <Loader2 size={14} className="animate-spin" />}
+            Export ({clips.length} clip{clips.length === 1 ? "" : "s"})
           </button>
+          {exportMsg && (
+            <p
+              className={`mt-1 break-words text-[11px] ${
+                exportMsg.startsWith("✓") ? "text-emerald-300" : "text-red-300"
+              }`}
+            >
+              {exportMsg}
+            </p>
+          )}
         </div>
       </Section>
 
