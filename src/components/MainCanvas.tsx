@@ -1,12 +1,23 @@
 import { Cpu, FolderOpen, Loader2, Redo2, Undo2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { findOverlap, snapToEdges } from "../lib/snap";
 import { tauri } from "../lib/tauri";
+import { clipEnd, type Clip } from "../lib/timeline";
 import { useApp } from "../store/appStore";
 import { WaveformRenderer } from "./WaveformRenderer";
 
 interface Props {
   onOpenFile: () => void;
 }
+
+type ClipDrag =
+  | { kind: "move"; id: number; grabOffset: number }
+  | { kind: "trim-start"; id: number }
+  | { kind: "trim-end"; id: number };
+
+const EDGE_HIT_PX = 6;
+const TRACK_HEIGHT_PX = 18;
+const SNAP_RATIO = 0.01; // ≈1 % of total duration
 
 export function MainCanvas({ onOpenFile }: Props) {
   const tool = useApp((s) => s.tool);
@@ -23,11 +34,14 @@ export function MainCanvas({ onOpenFile }: Props) {
   const canUndo = useApp((s) => s.canUndo);
   const canRedo = useApp((s) => s.canRedo);
   const mutateTimeline = useApp((s) => s.mutateTimeline);
+  const timeline = useApp((s) => s.timeline);
 
   const [loading, setLoading] = useState(false);
   const [zoom, setZoom] = useState(1);
+  const [hoverHandle, setHoverHandle] = useState<"trim" | "move" | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const dragStartRef = useRef<number | null>(null);
+  const clipDragRef = useRef<ClipDrag | null>(null);
 
   useEffect(() => {
     const onDrag = async (e: DragEvent) => {
@@ -52,8 +66,6 @@ export function MainCanvas({ onOpenFile }: Props) {
     };
   }, [setWaveform]);
 
-  // Keyboard shortcuts: Cmd/Ctrl+Z (undo), shift variant (redo),
-  // Backspace/Delete (apply cut), Esc (clear selection).
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       const target = e.target as HTMLElement | null;
@@ -83,6 +95,32 @@ export function MainCanvas({ onOpenFile }: Props) {
     return Math.max(0, Math.min(dur, ratio * dur));
   }
 
+  function secsPerPx(): number {
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect) return 0;
+    return waveform!.meta.duration_secs / rect.width;
+  }
+
+  function isOnClipLane(clientY: number): boolean {
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect) return false;
+    return clientY - rect.top >= rect.height - TRACK_HEIGHT_PX;
+  }
+
+  /** Find which clip / which handle the pointer is over. */
+  function hitTestClip(clientX: number): ClipDrag | null {
+    const t = pointerToSecs(clientX);
+    const sPerPx = secsPerPx();
+    const edgeSecs = EDGE_HIT_PX * sPerPx;
+    for (const c of clips) {
+      if (t < c.start - edgeSecs || t > clipEnd(c) + edgeSecs) continue;
+      if (Math.abs(t - c.start) <= edgeSecs) return { kind: "trim-start", id: c.id };
+      if (Math.abs(t - clipEnd(c)) <= edgeSecs) return { kind: "trim-end", id: c.id };
+      return { kind: "move", id: c.id, grabOffset: t - c.start };
+    }
+    return null;
+  }
+
   function onPointerDown(e: React.PointerEvent<HTMLDivElement>) {
     if (!waveform) return;
     const pos = pointerToSecs(e.clientX);
@@ -91,26 +129,90 @@ export function MainCanvas({ onOpenFile }: Props) {
       dragStartRef.current = pos;
       setSelection({ start: pos, end: pos });
       (e.target as Element).setPointerCapture(e.pointerId);
-    } else if (tool === "zoom") {
-      setZoom((z) => Math.min(16, z * 1.5));
-    } else {
-      setCursor(pos);
+      return;
     }
+    if (tool === "zoom") {
+      setZoom((z) => Math.min(16, z * 1.5));
+      return;
+    }
+
+    // Select tool: clip handle drag if pointer is in the lane
+    if (isOnClipLane(e.clientY)) {
+      const hit = hitTestClip(e.clientX);
+      if (hit) {
+        clipDragRef.current = hit;
+        (e.target as Element).setPointerCapture(e.pointerId);
+        return;
+      }
+    }
+    setCursor(pos);
   }
 
   function onPointerMove(e: React.PointerEvent<HTMLDivElement>) {
-    if (!waveform || dragStartRef.current === null) return;
-    const pos = pointerToSecs(e.clientX);
-    const start = Math.min(dragStartRef.current, pos);
-    const end = Math.max(dragStartRef.current, pos);
-    setSelection({ start, end });
+    if (!waveform) return;
+
+    if (clipDragRef.current) {
+      handleClipDragMove(e.clientX);
+      return;
+    }
+    if (dragStartRef.current !== null) {
+      const pos = pointerToSecs(e.clientX);
+      const start = Math.min(dragStartRef.current, pos);
+      const end = Math.max(dragStartRef.current, pos);
+      setSelection({ start, end });
+      return;
+    }
+
+    if (tool === "select" && isOnClipLane(e.clientY)) {
+      const hit = hitTestClip(e.clientX);
+      setHoverHandle(hit ? (hit.kind === "move" ? "move" : "trim") : null);
+    } else if (hoverHandle) {
+      setHoverHandle(null);
+    }
+  }
+
+  function handleClipDragMove(clientX: number) {
+    const drag = clipDragRef.current!;
+    const target = pointerToSecs(clientX);
+    const dur = waveform!.meta.duration_secs;
+    const snapThreshold = dur * SNAP_RATIO;
+
+    if (drag.kind === "trim-start") {
+      const snapped = snapToEdges(target, clips, snapThreshold, drag.id);
+      mutateTimeline((t) => t.trimStart(drag.id, snapped));
+    } else if (drag.kind === "trim-end") {
+      const snapped = snapToEdges(target, clips, snapThreshold, drag.id);
+      mutateTimeline((t) => t.trimEnd(drag.id, snapped));
+    } else {
+      const newStart = snapToEdges(
+        target - drag.grabOffset,
+        clips,
+        snapThreshold,
+        drag.id
+      );
+      mutateTimeline((t) => t.moveClip(drag.id, Math.max(0, newStart)));
+    }
   }
 
   function onPointerUp() {
-    if (dragStartRef.current === null) return;
-    dragStartRef.current = null;
-    if (selection && Math.abs(selection.end - selection.start) < 1e-3) {
-      setSelection(null);
+    // Selection drag finalize
+    if (dragStartRef.current !== null) {
+      dragStartRef.current = null;
+      if (selection && Math.abs(selection.end - selection.start) < 1e-3) {
+        setSelection(null);
+      }
+    }
+    // Clip drag finalize: detect overlap and apply crossfade
+    if (clipDragRef.current) {
+      const draggedId = clipDragRef.current.id;
+      clipDragRef.current = null;
+      const moving = clips.find((c) => c.id === draggedId);
+      if (moving) {
+        const overlap = findOverlap(moving as Clip, clips);
+        if (overlap && overlap.amount > 0.01) {
+          mutateTimeline((t) => t.crossfadeAt(overlap.midpoint, overlap.amount));
+        }
+      }
     }
   }
 
@@ -164,6 +266,15 @@ export function MainCanvas({ onOpenFile }: Props) {
     );
   }
 
+  const cursorStyle =
+    tool === "cut"
+      ? "crosshair"
+      : hoverHandle === "trim"
+      ? "ew-resize"
+      : hoverHandle === "move"
+      ? "grab"
+      : "pointer";
+
   return (
     <div className="flex flex-1 flex-col">
       <div className="flex h-8 items-center gap-3 border-b border-white/5 px-4 text-xs text-zinc-500">
@@ -191,7 +302,6 @@ export function MainCanvas({ onOpenFile }: Props) {
             <button
               onClick={applyCut}
               className="btn-primary ml-2 h-7 px-3 text-[11px]"
-              title="Cut selection (Backspace)"
             >
               Cut
             </button>
@@ -208,7 +318,7 @@ export function MainCanvas({ onOpenFile }: Props) {
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         className="relative flex-1 overflow-hidden"
-        style={{ cursor: tool === "cut" ? "crosshair" : "pointer" }}
+        style={{ cursor: cursorStyle }}
       >
         <WaveformRenderer
           waveform={waveform}
@@ -222,7 +332,7 @@ export function MainCanvas({ onOpenFile }: Props) {
       <div className="h-7 border-t border-white/5 px-4 text-xs leading-7 text-zinc-500">
         {selection
           ? `Selection: ${selection.start.toFixed(2)}s → ${selection.end.toFixed(2)}s (${(selection.end - selection.start).toFixed(2)}s) — Backspace to cut`
-          : `${clips.length} clip${clips.length === 1 ? "" : "s"} on timeline`}
+          : `${clips.length} clip${clips.length === 1 ? "" : "s"} · ${timeline.duration.toFixed(2)}s · drag clip edges to trim, body to move`}
       </div>
     </div>
   );

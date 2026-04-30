@@ -101,6 +101,27 @@ export function WaveformRenderer({
         ctx.fillStyle = accent;
         roundRect(ctx, x0 + 1, trackTop + 3, w - 2, 12, 3);
         ctx.fill();
+        // Fade indicators: thin lighter triangles at each end
+        const fadeInPx = (clip.fadeIn / dur) * ov.width;
+        const fadeOutPx = (clip.fadeOut / dur) * ov.width;
+        if (fadeInPx > 1) {
+          ctx.fillStyle = "rgba(255,255,255,0.55)";
+          ctx.beginPath();
+          ctx.moveTo(x0 + 1, trackTop + 14);
+          ctx.lineTo(x0 + 1 + fadeInPx, trackTop + 14);
+          ctx.lineTo(x0 + 1 + fadeInPx, trackTop + 4);
+          ctx.closePath();
+          ctx.fill();
+        }
+        if (fadeOutPx > 1) {
+          ctx.fillStyle = "rgba(255,255,255,0.55)";
+          ctx.beginPath();
+          ctx.moveTo(x1 - 1, trackTop + 14);
+          ctx.lineTo(x1 - 1 - fadeOutPx, trackTop + 14);
+          ctx.lineTo(x1 - 1 - fadeOutPx, trackTop + 4);
+          ctx.closePath();
+          ctx.fill();
+        }
       }
     }
 
