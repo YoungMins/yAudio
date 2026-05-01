@@ -82,7 +82,7 @@ export function Inspector() {
   }
 
   return (
-    <aside className="flex w-80 shrink-0 flex-col gap-3 border-l border-white/5 p-4 text-sm">
+    <aside className="flex w-80 shrink-0 flex-col gap-3 overflow-y-auto border-l border-white/5 p-4 text-sm">
       <Section title="File">
         {meta ? (
           <dl className="space-y-1 font-mono text-xs text-zinc-400">

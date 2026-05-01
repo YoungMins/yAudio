@@ -2,6 +2,7 @@ import {
   AlertTriangle,
   CheckCircle2,
   Download,
+  FileUp,
   HardDrive,
   Loader2,
   RefreshCw,
@@ -104,6 +105,28 @@ export function ModelManager() {
     await refresh();
   }
 
+  async function onImport(m: ModelInfo) {
+    try {
+      const dlg = await import("@tauri-apps/plugin-dialog");
+      const picked = await dlg.open({
+        multiple: false,
+        directory: false,
+        filters: [{ name: "ONNX model", extensions: ["onnx"] }],
+      });
+      if (typeof picked !== "string") return;
+      await tauri.importModel(m.id, picked);
+      await refresh();
+    } catch (e) {
+      setProgress({
+        id: m.id,
+        received: 0,
+        total: m.size_bytes,
+        done: false,
+        error: e instanceof Error ? e.message : String(e),
+      });
+    }
+  }
+
   if (!open) return null;
 
   return (
@@ -159,6 +182,7 @@ export function ModelManager() {
               highlighted={m.id === highlight}
               onDownload={() => onDownload(m)}
               onDelete={() => onDelete(m)}
+              onImport={() => onImport(m)}
             />
           ))}
         </ul>
@@ -178,12 +202,14 @@ function ModelRow({
   highlighted,
   onDownload,
   onDelete,
+  onImport,
 }: {
   model: ModelInfo;
   progress?: { received: number; total: number; done: boolean; error: string | null };
   highlighted: boolean;
   onDownload: () => void;
   onDelete: () => void;
+  onImport: () => void;
 }) {
   const isDownloading = useMemo(
     () => model.status === "downloading" || (progress && !progress.done && !progress.error),
@@ -210,6 +236,12 @@ function ModelRow({
             <StatusBadge status={isDownloading ? "downloading" : model.status} />
           </div>
           <p className="mt-1 text-xs text-zinc-400">{model.purpose}</p>
+          {!model.url && model.status !== "installed" && (
+            <p className="mt-1 text-[11px] text-amber-300/80">
+              공개 직접-다운로드 URL이 없는 모델입니다. 직접 받으신 .onnx 파일을
+              Import로 추가하세요.
+            </p>
+          )}
           <div className="mt-2 flex items-center gap-3 font-mono text-[11px] text-zinc-500">
             <span>~{formatBytes(model.size_bytes)}</span>
             <span>·</span>
@@ -234,18 +266,31 @@ function ModelRow({
             </button>
           )}
           {model.status !== "installed" && (
-            <button
-              disabled={!!isDownloading}
-              onClick={onDownload}
-              className="btn-primary flex items-center gap-2 text-xs"
-            >
-              {isDownloading ? (
-                <Loader2 size={12} className="animate-spin" />
-              ) : (
-                <Download size={12} />
+            <div className="flex items-center gap-1">
+              <button
+                onClick={onImport}
+                className="tool-btn h-8 px-2 text-[11px]"
+                title="Import a local .onnx file"
+                style={{ width: "auto" }}
+              >
+                <FileUp size={12} className="mr-1" />
+                Import
+              </button>
+              {model.url && (
+                <button
+                  disabled={!!isDownloading}
+                  onClick={onDownload}
+                  className="btn-primary flex items-center gap-2 text-xs"
+                >
+                  {isDownloading ? (
+                    <Loader2 size={12} className="animate-spin" />
+                  ) : (
+                    <Download size={12} />
+                  )}
+                  {model.status === "corrupted" ? "재다운로드" : "다운로드"}
+                </button>
               )}
-              {model.status === "corrupted" ? "재다운로드" : "다운로드"}
-            </button>
+            </div>
           )}
         </div>
       </div>

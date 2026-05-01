@@ -63,6 +63,13 @@ async fn delete_model(app: AppHandle, id: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+async fn import_model(app: AppHandle, id: String, source_path: String) -> Result<(), String> {
+    ai::models::import(app, id, source_path)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn models_dir(app: AppHandle) -> Result<String, String> {
     ai::models::models_dir(&app)
         .map(|p| p.to_string_lossy().to_string())
@@ -119,6 +126,7 @@ fn main() {
             list_models,
             download_model,
             delete_model,
+            import_model,
             models_dir,
             run_ai,
             export_timeline,

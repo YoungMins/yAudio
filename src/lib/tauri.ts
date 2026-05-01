@@ -101,6 +101,13 @@ export const tauri = {
   deleteModel: (id: string) =>
     invokeOrMock<void>("delete_model", { id }, () => undefined as void),
 
+  importModel: (id: string, sourcePath: string) =>
+    invokeOrMock<void>(
+      "import_model",
+      { id, sourcePath },
+      () => undefined as void
+    ),
+
   modelsDir: () =>
     invokeOrMock<string>("models_dir", {}, () => "(browser preview)"),
 
@@ -158,7 +165,7 @@ function mockModels(): ModelInfo[] {
       id: "demucs-htdemucs",
       name: "Demucs htdemucs (ONNX)",
       purpose: "AI Stem Split — vocals / drums / bass / other",
-      url: "https://huggingface.co/spaces/abidlabs/music-separation/resolve/main/htdemucs.onnx",
+      url: null,
       filename: "htdemucs.onnx",
       size_bytes: 83_000_000,
       sha256: null,

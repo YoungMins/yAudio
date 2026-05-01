@@ -38,7 +38,8 @@ export interface ModelInfo {
   id: string;
   name: string;
   purpose: string;
-  url: string;
+  /** `null` means the model is import-only (no public URL). */
+  url: string | null;
   filename: string;
   size_bytes: number;
   sha256: string | null;

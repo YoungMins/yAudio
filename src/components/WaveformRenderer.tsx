@@ -8,6 +8,10 @@ interface Props {
   selection: { start: number; end: number } | null;
   clips: readonly Clip[];
   accent: string;
+  /** Visible window start in seconds (defaults to 0). */
+  viewStart?: number;
+  /** Visible window length in seconds (defaults to full duration). */
+  viewSpan?: number;
 }
 
 /**
@@ -21,7 +25,13 @@ export function WaveformRenderer({
   selection,
   clips,
   accent,
+  viewStart = 0,
+  viewSpan,
 }: Props) {
+  const totalDur = waveform.meta.duration_secs || 1;
+  const span = Math.max(0.001, viewSpan ?? totalDur);
+  const start = Math.max(0, Math.min(viewStart, Math.max(0, totalDur - span)));
+  const end = Math.min(totalDur, start + span);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const overlayRef = useRef<HTMLCanvasElement>(null);
   const gpuRef = useRef<GpuRenderer | null>(null);
@@ -59,23 +69,37 @@ export function WaveformRenderer({
   useEffect(() => {
     paint();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [waveform, accent]);
+  }, [waveform, accent, start, end]);
 
   useEffect(() => {
     paintOverlay();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cursorSecs, selection, waveform, clips]);
+  }, [cursorSecs, selection, waveform, clips, start, end]);
+
+  function visiblePeaks(): number[] {
+    const peaks = waveform.peaks;
+    const buckets = waveform.bucket_count;
+    const i0 = Math.max(0, Math.floor((start / totalDur) * buckets));
+    const i1 = Math.min(buckets, Math.ceil((end / totalDur) * buckets));
+    return peaks.slice(i0 * 2, i1 * 2);
+  }
 
   function paint() {
     const canvas = canvasRef.current;
     if (!canvas) return;
     fitCanvas(canvas);
+    const slice = visiblePeaks();
     if (gpuRef.current) {
-      gpuRef.current.draw(waveform.peaks);
+      gpuRef.current.draw(slice);
     } else {
-      paint2d(canvas, waveform.peaks, accent);
+      paint2d(canvas, slice, accent);
     }
     paintOverlay();
+  }
+
+  /** Map a timeline second into a horizontal pixel within the overlay. */
+  function secsToX(width: number, t: number): number {
+    return ((t - start) / (end - start)) * width;
   }
 
   function paintOverlay() {
@@ -86,24 +110,23 @@ export function WaveformRenderer({
     const ctx = ov.getContext("2d");
     if (!ctx) return;
     ctx.clearRect(0, 0, ov.width, ov.height);
-    const dur = waveform.meta.duration_secs || 1;
     const trackTop = ov.height - 18;
 
-    // Clip lane along the bottom of the canvas. Each clip is a small
-    // rounded rectangle so the user can see how the timeline has been cut.
     if (clips.length > 0) {
       ctx.fillStyle = `${accent}22`;
       ctx.fillRect(0, trackTop, ov.width, 18);
       for (const clip of clips) {
-        const x0 = (clip.start / dur) * ov.width;
-        const x1 = ((clip.start + clip.duration) / dur) * ov.width;
+        const cs = clip.start;
+        const ce = clip.start + clip.duration;
+        if (ce <= start || cs >= end) continue;
+        const x0 = secsToX(ov.width, Math.max(cs, start));
+        const x1 = secsToX(ov.width, Math.min(ce, end));
         const w = Math.max(2, x1 - x0);
         ctx.fillStyle = accent;
         roundRect(ctx, x0 + 1, trackTop + 3, w - 2, 12, 3);
         ctx.fill();
-        // Fade indicators: thin lighter triangles at each end
-        const fadeInPx = (clip.fadeIn / dur) * ov.width;
-        const fadeOutPx = (clip.fadeOut / dur) * ov.width;
+        const fadeInPx = (clip.fadeIn / (end - start)) * ov.width;
+        const fadeOutPx = (clip.fadeOut / (end - start)) * ov.width;
         if (fadeInPx > 1) {
           ctx.fillStyle = "rgba(255,255,255,0.55)";
           ctx.beginPath();
@@ -126,8 +149,8 @@ export function WaveformRenderer({
     }
 
     if (selection) {
-      const x0 = (selection.start / dur) * ov.width;
-      const x1 = (selection.end / dur) * ov.width;
+      const x0 = secsToX(ov.width, selection.start);
+      const x1 = secsToX(ov.width, selection.end);
       ctx.fillStyle = `${accent}33`;
       ctx.fillRect(x0, 0, x1 - x0, trackTop);
       ctx.strokeStyle = accent;
@@ -135,7 +158,7 @@ export function WaveformRenderer({
       ctx.strokeRect(x0 + 0.5, 0.5, x1 - x0 - 1, trackTop - 1);
     }
 
-    const cx = (cursorSecs / dur) * ov.width;
+    const cx = secsToX(ov.width, cursorSecs);
     ctx.strokeStyle = accent;
     ctx.lineWidth = 2;
     ctx.beginPath();

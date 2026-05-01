@@ -15,32 +15,40 @@ pub struct ModelDef {
     pub id: &'static str,
     pub name: &'static str,
     pub purpose: &'static str,
-    pub url: &'static str,
+    /// Direct URL to the ONNX file. `None` means the model is import-only
+    /// (the user supplies their own .onnx through the file picker).
+    pub url: Option<&'static str>,
     pub filename: &'static str,
     pub size_bytes: u64,
     pub sha256: Option<&'static str>,
     pub license: &'static str,
 }
 
-/// Registry of supported local AI models. URLs point at the upstream
-/// ONNX exports — yAudio never re-hosts model weights; the user pulls
-/// them once into a local cache directory.
+/// Registry of supported local AI models. URLs point at known-public
+/// mirrors of the upstream ONNX exports — yAudio never re-hosts model
+/// weights; the user pulls them once into a local cache directory. When
+/// no public single-file URL is available, the entry is import-only.
 pub const REGISTRY: &[ModelDef] = &[
     ModelDef {
         id: "rnnoise",
-        name: "RNNoise (ONNX)",
-        purpose: "AI Noise Clean — voice / ambient denoising",
-        url: "https://huggingface.co/onnx-community/rnnoise/resolve/main/rnnoise.onnx",
+        name: "GTCRN denoiser (ONNX)",
+        purpose: "AI Noise Clean — speech enhancement",
+        // Mirror maintained by the sherpa-onnx project.
+        url: Some(
+            "https://github.com/k2-fsa/sherpa-onnx/releases/download/speech-enhancement-models/gtcrn_simple.onnx",
+        ),
         filename: "rnnoise.onnx",
-        size_bytes: 2_300_000,
+        size_bytes: 1_300_000,
         sha256: None,
-        license: "BSD-3-Clause",
+        license: "Apache-2.0",
     },
     ModelDef {
         id: "demucs-htdemucs",
         name: "Demucs htdemucs (ONNX)",
         purpose: "AI Stem Split — vocals / drums / bass / other",
-        url: "https://huggingface.co/spaces/abidlabs/music-separation/resolve/main/htdemucs.onnx",
+        // Public direct ONNX exports are not available; fetch a Demucs
+        // ONNX from your own source and import it via the manager.
+        url: None,
         filename: "htdemucs.onnx",
         size_bytes: 83_000_000,
         sha256: None,
@@ -50,7 +58,9 @@ pub const REGISTRY: &[ModelDef] = &[
         id: "silero-vad",
         name: "Silero VAD",
         purpose: "Smart silence detection — voice activity",
-        url: "https://github.com/snakers4/silero-vad/raw/master/files/silero_vad.onnx",
+        url: Some(
+            "https://github.com/snakers4/silero-vad/raw/master/src/silero_vad/data/silero_vad.onnx",
+        ),
         filename: "silero_vad.onnx",
         size_bytes: 1_800_000,
         sha256: None,
@@ -169,21 +179,27 @@ async fn stream_to_file(
     tmp_path: &Path,
     final_path: &Path,
 ) -> AudioResult<()> {
+    let url = def.url.ok_or_else(|| {
+        AudioError::External(format!(
+            "{} has no public URL — use 'Import file…' to supply your own .onnx",
+            def.id
+        ))
+    })?;
+
     let client = reqwest::Client::builder()
         .user_agent("yAudio/0.1 (+https://github.com/youngmins/yaudio)")
         .build()
         .map_err(|e| AudioError::External(format!("http client: {e}")))?;
 
     let resp = client
-        .get(def.url)
+        .get(url)
         .send()
         .await
-        .map_err(|e| AudioError::External(format!("GET {}: {e}", def.url)))?;
+        .map_err(|e| AudioError::External(format!("GET {url}: {e}")))?;
     if !resp.status().is_success() {
         return Err(AudioError::External(format!(
-            "HTTP {} from {}",
-            resp.status(),
-            def.url
+            "HTTP {} from {url}",
+            resp.status()
         )));
     }
     let total = resp.content_length().unwrap_or(def.size_bytes);
@@ -229,6 +245,19 @@ async fn stream_to_file(
     }
 
     fs::rename(tmp_path, final_path).await?;
+    Ok(())
+}
+
+/// Copy a user-supplied .onnx file from `source_path` into the models
+/// directory under the registry's expected filename. Used as a manual
+/// fallback when a model has no public URL or its mirror is unreachable.
+pub async fn import(app: AppHandle, id: String, source_path: String) -> AudioResult<()> {
+    let def = lookup(&id)
+        .ok_or_else(|| AudioError::External(format!("unknown model: {id}")))?;
+    let dst = models_dir(&app)?.join(def.filename);
+    fs::copy(&source_path, &dst)
+        .await
+        .map_err(|e| AudioError::External(format!("import {source_path} → {}: {e}", dst.display())))?;
     Ok(())
 }
 

@@ -1,4 +1,4 @@
-import { Cpu, FolderOpen, Loader2, Redo2, Undo2 } from "lucide-react";
+import { Cpu, FolderOpen, Loader2, Redo2, Undo2, ZoomIn, ZoomOut } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { findOverlap, snapToEdges } from "../lib/snap";
 import { tauri } from "../lib/tauri";
@@ -17,7 +17,8 @@ type ClipDrag =
 
 const EDGE_HIT_PX = 6;
 const TRACK_HEIGHT_PX = 18;
-const SNAP_RATIO = 0.01; // ≈1 % of total duration
+const SNAP_RATIO = 0.01; // 1% of visible window
+const MIN_VIEW_SECS = 0.05;
 
 export function MainCanvas({ onOpenFile }: Props) {
   const tool = useApp((s) => s.tool);
@@ -36,12 +37,31 @@ export function MainCanvas({ onOpenFile }: Props) {
   const mutateTimeline = useApp((s) => s.mutateTimeline);
   const timeline = useApp((s) => s.timeline);
 
+  const totalDur = waveform?.meta.duration_secs ?? 0;
   const [loading, setLoading] = useState(false);
   const [zoom, setZoom] = useState(1);
+  const [viewStart, setViewStart] = useState(0);
   const [hoverHandle, setHoverHandle] = useState<"trim" | "move" | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const dragStartRef = useRef<number | null>(null);
   const clipDragRef = useRef<ClipDrag | null>(null);
+
+  const viewSpan = totalDur > 0 ? totalDur / zoom : 1;
+  const clampedViewStart = Math.max(0, Math.min(viewStart, Math.max(0, totalDur - viewSpan)));
+
+  // Reset view when a new file loads.
+  useEffect(() => {
+    setZoom(1);
+    setViewStart(0);
+  }, [waveform?.meta.path]);
+
+  // Auto-pan: keep playback cursor in view.
+  useEffect(() => {
+    if (!waveform || !totalDur) return;
+    if (cursor < clampedViewStart || cursor > clampedViewStart + viewSpan) {
+      setViewStart(Math.max(0, Math.min(totalDur - viewSpan, cursor - viewSpan / 2)));
+    }
+  }, [cursor, clampedViewStart, viewSpan, totalDur, waveform]);
 
   useEffect(() => {
     const onDrag = async (e: DragEvent) => {
@@ -91,14 +111,14 @@ export function MainCanvas({ onOpenFile }: Props) {
   function pointerToSecs(clientX: number): number {
     const rect = containerRef.current!.getBoundingClientRect();
     const ratio = (clientX - rect.left) / rect.width;
-    const dur = waveform!.meta.duration_secs;
-    return Math.max(0, Math.min(dur, ratio * dur));
+    const t = clampedViewStart + ratio * viewSpan;
+    return Math.max(0, Math.min(totalDur, t));
   }
 
   function secsPerPx(): number {
     const rect = containerRef.current?.getBoundingClientRect();
     if (!rect) return 0;
-    return waveform!.meta.duration_secs / rect.width;
+    return viewSpan / rect.width;
   }
 
   function isOnClipLane(clientY: number): boolean {
@@ -107,7 +127,6 @@ export function MainCanvas({ onOpenFile }: Props) {
     return clientY - rect.top >= rect.height - TRACK_HEIGHT_PX;
   }
 
-  /** Find which clip / which handle the pointer is over. */
   function hitTestClip(clientX: number): ClipDrag | null {
     const t = pointerToSecs(clientX);
     const sPerPx = secsPerPx();
@@ -132,11 +151,13 @@ export function MainCanvas({ onOpenFile }: Props) {
       return;
     }
     if (tool === "zoom") {
-      setZoom((z) => Math.min(16, z * 1.5));
+      const factor = e.altKey ? 1 / 1.5 : 1.5;
+      const newZoom = Math.max(1, Math.min(64, zoom * factor));
+      setViewStart(pos - (pos - clampedViewStart) * (zoom / newZoom));
+      setZoom(newZoom);
       return;
     }
 
-    // Select tool: clip handle drag if pointer is in the lane
     if (isOnClipLane(e.clientY)) {
       const hit = hitTestClip(e.clientX);
       if (hit) {
@@ -174,8 +195,7 @@ export function MainCanvas({ onOpenFile }: Props) {
   function handleClipDragMove(clientX: number) {
     const drag = clipDragRef.current!;
     const target = pointerToSecs(clientX);
-    const dur = waveform!.meta.duration_secs;
-    const snapThreshold = dur * SNAP_RATIO;
+    const snapThreshold = viewSpan * SNAP_RATIO;
 
     if (drag.kind === "trim-start") {
       const snapped = snapToEdges(target, clips, snapThreshold, drag.id);
@@ -195,14 +215,12 @@ export function MainCanvas({ onOpenFile }: Props) {
   }
 
   function onPointerUp() {
-    // Selection drag finalize
     if (dragStartRef.current !== null) {
       dragStartRef.current = null;
       if (selection && Math.abs(selection.end - selection.start) < 1e-3) {
         setSelection(null);
       }
     }
-    // Clip drag finalize: detect overlap and apply crossfade
     if (clipDragRef.current) {
       const draggedId = clipDragRef.current.id;
       clipDragRef.current = null;
@@ -216,10 +234,35 @@ export function MainCanvas({ onOpenFile }: Props) {
     }
   }
 
+  function onWheel(e: React.WheelEvent<HTMLDivElement>) {
+    if (!waveform) return;
+    if (e.ctrlKey || e.metaKey) {
+      const factor = e.deltaY < 0 ? 1.25 : 1 / 1.25;
+      const newZoom = Math.max(1, Math.min(64, zoom * factor));
+      const anchor = pointerToSecs(e.clientX);
+      const newSpan = totalDur / newZoom;
+      setViewStart(
+        Math.max(0, Math.min(totalDur - newSpan, anchor - newSpan / 2))
+      );
+      setZoom(newZoom);
+    } else {
+      const dx = e.deltaY * (viewSpan / 600);
+      setViewStart((v) => Math.max(0, Math.min(totalDur - viewSpan, v + dx)));
+    }
+  }
+
   function applyCut() {
     if (!selection) return;
     mutateTimeline((t) => t.deleteRange(selection.start, selection.end));
     setSelection(null);
+  }
+
+  function zoomBy(factor: number) {
+    const center = clampedViewStart + viewSpan / 2;
+    const newZoom = Math.max(1, Math.min(64, zoom * factor));
+    const newSpan = totalDur / newZoom;
+    setViewStart(Math.max(0, Math.min(totalDur - newSpan, center - newSpan / 2)));
+    setZoom(newZoom);
   }
 
   const accent = theme === "dark" ? "#8B5CF6" : "#6D28D9";
@@ -269,18 +312,42 @@ export function MainCanvas({ onOpenFile }: Props) {
   const cursorStyle =
     tool === "cut"
       ? "crosshair"
+      : tool === "zoom"
+      ? "zoom-in"
       : hoverHandle === "trim"
       ? "ew-resize"
       : hoverHandle === "move"
       ? "grab"
       : "pointer";
 
+  // Range slider models the visible window's left edge in seconds. We
+  // disable it when fully zoomed out (whole file already visible).
+  const sliderMax = Math.max(0, totalDur - viewSpan);
+
   return (
     <div className="flex flex-1 flex-col">
       <div className="flex h-8 items-center gap-3 border-b border-white/5 px-4 text-xs text-zinc-500">
         <span>Tool: <span className="accent uppercase">{tool}</span></span>
-        <span>Zoom: ×{zoom.toFixed(1)}</span>
         <span>Clips: {clips.length}</span>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => zoomBy(1 / 1.5)}
+            disabled={zoom <= 1}
+            className="tool-btn h-7 w-7 disabled:opacity-30"
+            title="Zoom out"
+          >
+            <ZoomOut size={13} />
+          </button>
+          <span className="font-mono">×{zoom.toFixed(1)}</span>
+          <button
+            onClick={() => zoomBy(1.5)}
+            disabled={zoom >= 64}
+            className="tool-btn h-7 w-7 disabled:opacity-30"
+            title="Zoom in"
+          >
+            <ZoomIn size={13} />
+          </button>
+        </div>
         <div className="ml-auto flex items-center gap-1">
           <button
             onClick={() => mutateTimeline((t) => t.undo())}
@@ -298,10 +365,11 @@ export function MainCanvas({ onOpenFile }: Props) {
           >
             <Redo2 size={13} />
           </button>
-          {selection && tool === "cut" && (
+          {selection && (
             <button
               onClick={applyCut}
               className="btn-primary ml-2 h-7 px-3 text-[11px]"
+              title="Cut selection (Backspace)"
             >
               Cut
             </button>
@@ -317,6 +385,7 @@ export function MainCanvas({ onOpenFile }: Props) {
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
+        onWheel={onWheel}
         className="relative flex-1 overflow-hidden"
         style={{ cursor: cursorStyle }}
       >
@@ -326,13 +395,35 @@ export function MainCanvas({ onOpenFile }: Props) {
           selection={selection}
           clips={clips}
           accent={accent}
+          viewStart={clampedViewStart}
+          viewSpan={Math.max(MIN_VIEW_SECS, viewSpan)}
         />
+      </div>
+
+      {/* Horizontal pan slider — only meaningful when zoomed in */}
+      <div className="flex h-7 items-center gap-3 border-t border-white/5 px-4">
+        <span className="font-mono text-[10px] text-zinc-500 tabular-nums">
+          {clampedViewStart.toFixed(1)}s
+        </span>
+        <input
+          type="range"
+          min={0}
+          max={Math.max(0.0001, sliderMax)}
+          step={Math.max(0.001, viewSpan / 1000)}
+          value={Math.min(clampedViewStart, sliderMax)}
+          onChange={(e) => setViewStart(Number(e.target.value))}
+          disabled={sliderMax <= 0}
+          className="flex-1 accent-[var(--accent)] disabled:opacity-30"
+        />
+        <span className="font-mono text-[10px] text-zinc-500 tabular-nums">
+          {(clampedViewStart + viewSpan).toFixed(1)}s / {totalDur.toFixed(1)}s
+        </span>
       </div>
 
       <div className="h-7 border-t border-white/5 px-4 text-xs leading-7 text-zinc-500">
         {selection
-          ? `Selection: ${selection.start.toFixed(2)}s → ${selection.end.toFixed(2)}s (${(selection.end - selection.start).toFixed(2)}s) — Backspace to cut`
-          : `${clips.length} clip${clips.length === 1 ? "" : "s"} · ${timeline.duration.toFixed(2)}s · drag clip edges to trim, body to move`}
+          ? `Selection: ${selection.start.toFixed(2)}s → ${selection.end.toFixed(2)}s (${(selection.end - selection.start).toFixed(2)}s) — Backspace to cut, Esc to clear`
+          : `${clips.length} clip${clips.length === 1 ? "" : "s"} · ${timeline.duration.toFixed(2)}s · drag clip edges to trim, body to move · Cut tool (C) drag to select · ⌘/Ctrl+wheel to zoom`}
       </div>
     </div>
   );

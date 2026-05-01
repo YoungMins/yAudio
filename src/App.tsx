@@ -5,6 +5,7 @@ import { MagicLinkDialog } from "./components/MagicLinkDialog";
 import { MagicToolbar } from "./components/MagicToolbar";
 import { MainCanvas } from "./components/MainCanvas";
 import { ModelManager } from "./components/ModelManager";
+import { useAudioPlayer } from "./hooks/useAudioPlayer";
 import { modelForFeature } from "./lib/models";
 import { tauri } from "./lib/tauri";
 import { useApp } from "./store/appStore";
@@ -19,6 +20,7 @@ export default function App() {
   const openModelManager = useApp((s) => s.openModelManager);
 
   const [magicOpen, setMagicOpen] = useState(false);
+  const { audioRef } = useAudioPlayer();
 
   // Refresh model status on launch so toolbar gating works immediately.
   useEffect(() => {
@@ -95,6 +97,7 @@ export default function App() {
       </div>
       <MagicLinkDialog open={magicOpen} onClose={() => setMagicOpen(false)} />
       <ModelManager />
+      <audio ref={audioRef} preload="auto" />
     </div>
   );
 }
