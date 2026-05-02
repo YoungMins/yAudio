@@ -208,3 +208,63 @@ describe("Timeline — crossfade", () => {
     expect(t.clips[1].fadeIn).toBeCloseTo(0.5);
   });
 });
+
+describe("Timeline — applyTimelineFadeIn/Out (whole-track envelope)", () => {
+  it("returns false on an empty timeline", () => {
+    const t = new Timeline();
+    expect(t.applyTimelineFadeIn(1)).toBe(false);
+    expect(t.applyTimelineFadeOut(1)).toBe(false);
+  });
+
+  it("single clip: in goes on the only clip, out goes on the only clip", () => {
+    const t = tlWith([[0, 5]]);
+    expect(t.applyTimelineFadeIn(1.2)).toBe(true);
+    expect(t.applyTimelineFadeOut(0.8)).toBe(true);
+    expect(t.clips[0].fadeIn).toBeCloseTo(1.2);
+    expect(t.clips[0].fadeOut).toBeCloseTo(0.8);
+  });
+
+  it("multi-clip: in goes on the chronologically-first clip, out on the last", () => {
+    // add out-of-order to verify sorting matters
+    const t = new Timeline();
+    t.add({ sourcePath: "x", start: 5, duration: 2, sourceOffset: 0 });
+    t.add({ sourcePath: "x", start: 0, duration: 2, sourceOffset: 0 });
+    t.add({ sourcePath: "x", start: 2, duration: 2, sourceOffset: 0 });
+    t.applyTimelineFadeIn(0.5);
+    t.applyTimelineFadeOut(0.7);
+    // first by start: start=0
+    const first = t.clips.find((c) => c.start === 0)!;
+    const last = t.clips.find((c) => c.start === 5)!;
+    expect(first.fadeIn).toBeCloseTo(0.5);
+    expect(last.fadeOut).toBeCloseTo(0.7);
+    // middle clip untouched
+    const mid = t.clips.find((c) => c.start === 2)!;
+    expect(mid.fadeIn).toBe(0);
+    expect(mid.fadeOut).toBe(0);
+  });
+
+  it("clamps fade duration to the clip's own length", () => {
+    const t = tlWith([[0, 1]]);
+    t.applyTimelineFadeIn(5);
+    expect(t.clips[0].fadeIn).toBeCloseTo(1);
+  });
+
+  it("getters reflect the envelope", () => {
+    const t = tlWith([
+      [0, 2],
+      [2, 2],
+    ]);
+    t.applyTimelineFadeIn(0.3);
+    t.applyTimelineFadeOut(0.4);
+    expect(t.timelineFadeIn).toBeCloseTo(0.3);
+    expect(t.timelineFadeOut).toBeCloseTo(0.4);
+  });
+
+  it("undo reverts the fade change", () => {
+    const t = tlWith([[0, 5]]);
+    t.applyTimelineFadeIn(1);
+    expect(t.clips[0].fadeIn).toBeCloseTo(1);
+    t.undo();
+    expect(t.clips[0].fadeIn).toBeCloseTo(0);
+  });
+});

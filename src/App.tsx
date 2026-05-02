@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { BatchExportDialog } from "./components/BatchExportDialog";
+import { BatchFadeDialog } from "./components/BatchFadeDialog";
 import { FileList } from "./components/FileList";
 import { Header } from "./components/Header";
 import { Inspector } from "./components/Inspector";
@@ -29,6 +30,7 @@ export default function App() {
 
   const [magicOpen, setMagicOpen] = useState(false);
   const [batchExportOpen, setBatchExportOpen] = useState(false);
+  const [batchFadeOpen, setBatchFadeOpen] = useState(false);
   const [busy, setBusy] = useState<BatchProgress | null>(null);
   const { audioRef } = useAudioPlayer();
 
@@ -197,6 +199,7 @@ export default function App() {
         <FileList
           onAddFiles={handleOpenFiles}
           onBatchExport={() => setBatchExportOpen(true)}
+          onBatchFade={() => setBatchFadeOpen(true)}
           onBatchClean={batchClean}
           onBatchTrimSilence={batchTrimSilence}
           busy={busy}
@@ -213,6 +216,13 @@ export default function App() {
         onClose={() => setBatchExportOpen(false)}
         onProgress={(current, total) =>
           setBusy(current < total ? { label: "Exporting…", current, total } : null)
+        }
+      />
+      <BatchFadeDialog
+        open={batchFadeOpen}
+        onClose={() => setBatchFadeOpen(false)}
+        onProgress={(current, total) =>
+          setBusy(current < total ? { label: "Fading…", current, total } : null)
         }
       />
       <audio ref={audioRef} preload="auto" />

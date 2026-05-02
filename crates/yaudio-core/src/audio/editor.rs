@@ -317,6 +317,36 @@ impl Timeline {
         true
     }
 
+    /// Apply a fade-in across the whole timeline by setting it on the
+    /// chronologically-first clip. Returns false when empty.
+    pub fn apply_timeline_fade_in(&mut self, secs: f64) -> bool {
+        if let Some(first) = self.clips.first() {
+            let id = first.id;
+            self.set_fade_in(id, secs)
+        } else {
+            false
+        }
+    }
+
+    /// Apply a fade-out across the whole timeline by setting it on the
+    /// chronologically-last clip.
+    pub fn apply_timeline_fade_out(&mut self, secs: f64) -> bool {
+        if let Some(last) = self.clips.last() {
+            let id = last.id;
+            self.set_fade_out(id, secs)
+        } else {
+            false
+        }
+    }
+
+    pub fn timeline_fade_in(&self) -> f64 {
+        self.clips.first().map(|c| c.fade_in).unwrap_or(0.0)
+    }
+
+    pub fn timeline_fade_out(&self) -> f64 {
+        self.clips.last().map(|c| c.fade_out).unwrap_or(0.0)
+    }
+
     pub fn undo(&mut self) -> bool {
         if let Some(prev) = self.history.pop() {
             self.future.push(std::mem::replace(&mut self.clips, prev));
@@ -566,6 +596,40 @@ mod tests {
         assert!(!t.move_clip(42, 1.0));
         assert!(!t.set_fade_in(42, 0.5));
         assert!(!t.set_fade_out(42, 0.5));
+    }
+
+    #[test]
+    fn apply_timeline_fade_in_sets_first_clip_only() {
+        let mut t = Timeline::new();
+        t.add("a", 5.0, 2.0, 0.0);
+        t.add("a", 0.0, 2.0, 0.0);
+        t.add("a", 2.0, 2.0, 0.0);
+        assert!(t.apply_timeline_fade_in(0.5));
+        assert!(t.apply_timeline_fade_out(0.7));
+        let starts: Vec<f64> = t.clips().iter().map(|c| c.start).collect();
+        assert_eq!(starts, vec![0.0, 2.0, 5.0]);
+        assert!((t.clips()[0].fade_in - 0.5).abs() < 1e-9);
+        assert!((t.clips()[2].fade_out - 0.7).abs() < 1e-9);
+        assert_eq!(t.clips()[1].fade_in, 0.0);
+        assert_eq!(t.clips()[1].fade_out, 0.0);
+    }
+
+    #[test]
+    fn apply_timeline_fade_returns_false_on_empty_timeline() {
+        let mut t = Timeline::new();
+        assert!(!t.apply_timeline_fade_in(1.0));
+        assert!(!t.apply_timeline_fade_out(1.0));
+    }
+
+    #[test]
+    fn timeline_fade_getters_match_first_and_last_clip() {
+        let mut t = Timeline::new();
+        t.add("a", 0.0, 2.0, 0.0);
+        t.add("a", 2.0, 2.0, 0.0);
+        t.apply_timeline_fade_in(0.3);
+        t.apply_timeline_fade_out(0.4);
+        assert!((t.timeline_fade_in() - 0.3).abs() < 1e-9);
+        assert!((t.timeline_fade_out() - 0.4).abs() < 1e-9);
     }
 
     #[test]

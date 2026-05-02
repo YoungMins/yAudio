@@ -1,9 +1,25 @@
-import { Layers, Loader2, Power, Scissors, Trash2, Volume2 } from "lucide-react";
+import {
+  Layers,
+  Loader2,
+  Power,
+  RotateCcw,
+  Scissors,
+  Trash2,
+  Volume2,
+  Waves,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 import { tauri } from "../lib/tauri";
 import { toExportClip } from "../lib/timeline";
 import { useApp } from "../store/appStore";
 import type { AudioFormat } from "../types/audio";
+
+const FADE_PRESETS = [
+  { label: "Off", value: 0 },
+  { label: "Short", value: 0.5 },
+  { label: "Medium", value: 1.5 },
+  { label: "Long", value: 3 },
+];
 
 const FORMATS: AudioFormat[] = ["mp3", "wav", "flac", "ogg", "aac", "m4a"];
 
@@ -15,6 +31,14 @@ export function Inspector() {
   const setSilences = useApp((s) => s.setSilences);
   const clips = useApp((s) => s.clips);
   const timeline = useApp((s) => s.timeline);
+  const mutateTimeline = useApp((s) => s.mutateTimeline);
+
+  // Read live fade values from the active timeline. The first/last clip's
+  // fade-in/fade-out is the "track envelope".
+  const fadeIn = timeline.timelineFadeIn;
+  const fadeOut = timeline.timelineFadeOut;
+  const totalDur = meta?.duration_secs ?? 0;
+  const fadeMax = Math.max(0.1, Math.min(10, totalDur / 2));
 
   const [targetMb, setTargetMb] = useState(3);
   const [estimatedKbps, setEstimatedKbps] = useState<number | null>(null);
@@ -119,6 +143,50 @@ export function Inspector() {
         )}
       </Section>
 
+      <Section title="Fade In / Out" icon={<Waves size={14} />}>
+        {meta && clips.length > 0 ? (
+          <div className="space-y-3 text-xs">
+            <FadeControl
+              label="Fade In"
+              value={fadeIn}
+              max={fadeMax}
+              onChange={(v) =>
+                mutateTimeline((t) => t.applyTimelineFadeIn(v))
+              }
+            />
+            <FadeControl
+              label="Fade Out"
+              value={fadeOut}
+              max={fadeMax}
+              onChange={(v) =>
+                mutateTimeline((t) => t.applyTimelineFadeOut(v))
+              }
+            />
+            <div className="flex items-center justify-between">
+              <span className="text-zinc-500">Presets</span>
+              <div className="flex gap-1">
+                {FADE_PRESETS.map((p) => (
+                  <button
+                    key={p.label}
+                    onClick={() =>
+                      mutateTimeline((t) => {
+                        t.applyTimelineFadeIn(p.value);
+                        t.applyTimelineFadeOut(p.value);
+                      })
+                    }
+                    className="rounded border border-white/5 px-2 py-0.5 text-[10px] text-zinc-300 hover:bg-white/5"
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        ) : (
+          <p className="text-xs text-zinc-500">파일을 열면 페이드를 설정할 수 있습니다.</p>
+        )}
+      </Section>
+
       <Section title="Smart Compression" icon={<Volume2 size={14} />}>
         <div className="space-y-2">
           <label className="flex items-center justify-between text-xs">
@@ -216,6 +284,34 @@ export function Inspector() {
 
       <Section title="Effect Stack" icon={<Layers size={14} />}>
         <ul className="space-y-1">
+          {fadeIn > 0 && (
+            <li className="glass flex items-center justify-between px-3 py-2">
+              <span className="text-xs">
+                Fade In <span className="font-mono text-zinc-500">{fadeIn.toFixed(2)}s</span>
+              </span>
+              <button
+                onClick={() => mutateTimeline((t) => t.applyTimelineFadeIn(0))}
+                className="tool-btn h-7 w-7"
+                title="Clear fade in"
+              >
+                <RotateCcw size={12} />
+              </button>
+            </li>
+          )}
+          {fadeOut > 0 && (
+            <li className="glass flex items-center justify-between px-3 py-2">
+              <span className="text-xs">
+                Fade Out <span className="font-mono text-zinc-500">{fadeOut.toFixed(2)}s</span>
+              </span>
+              <button
+                onClick={() => mutateTimeline((t) => t.applyTimelineFadeOut(0))}
+                className="tool-btn h-7 w-7"
+                title="Clear fade out"
+              >
+                <RotateCcw size={12} />
+              </button>
+            </li>
+          )}
           {effects.map((e) => (
             <li
               key={e.id}
@@ -231,7 +327,7 @@ export function Inspector() {
               </button>
             </li>
           ))}
-          {effects.length === 0 && (
+          {effects.length === 0 && fadeIn === 0 && fadeOut === 0 && (
             <li className="flex items-center gap-2 text-xs text-zinc-500">
               <Trash2 size={12} /> 효과가 비어 있습니다.
             </li>
@@ -267,6 +363,36 @@ function Row({ k, v }: { k: string; v: string }) {
     <div className="flex items-center justify-between">
       <dt>{k}</dt>
       <dd className="text-zinc-200">{v}</dd>
+    </div>
+  );
+}
+
+function FadeControl({
+  label,
+  value,
+  max,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  max: number;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <div>
+      <label className="flex items-center justify-between">
+        <span className="text-zinc-400">{label}</span>
+        <span className="font-mono accent">{value.toFixed(2)} s</span>
+      </label>
+      <input
+        type="range"
+        min={0}
+        max={max}
+        step={0.05}
+        value={Math.min(value, max)}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="mt-1 w-full accent-[var(--accent)]"
+      />
     </div>
   );
 }

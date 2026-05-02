@@ -266,6 +266,35 @@ export class Timeline {
     return true;
   }
 
+  /**
+   * Apply a fade-in across the whole timeline by setting it on the
+   * chronologically-first clip. Mirrors `setFadeIn` semantics (clamps
+   * to clip duration, snapshots for undo).
+   */
+  applyTimelineFadeIn(secs: number): boolean {
+    const first = this._clips[0]; // _clips is kept sorted by start
+    return first ? this.setFadeIn(first.id, secs) : false;
+  }
+
+  /**
+   * Apply a fade-out across the whole timeline by setting it on the
+   * chronologically-last clip.
+   */
+  applyTimelineFadeOut(secs: number): boolean {
+    const last = this._clips[this._clips.length - 1];
+    return last ? this.setFadeOut(last.id, secs) : false;
+  }
+
+  /** Current fade-in on the first clip, or 0 when the timeline is empty. */
+  get timelineFadeIn(): number {
+    return this._clips[0]?.fadeIn ?? 0;
+  }
+
+  /** Current fade-out on the last clip, or 0 when empty. */
+  get timelineFadeOut(): number {
+    return this._clips[this._clips.length - 1]?.fadeOut ?? 0;
+  }
+
   undo(): boolean {
     const prev = this.history.pop();
     if (!prev) return false;
