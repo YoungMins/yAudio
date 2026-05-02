@@ -45,7 +45,9 @@ fn open_format(path: &str) -> AudioResult<(Box<dyn FormatReader>, usize)> {
     )?;
 
     let format = probed.format;
-    let track_idx = format
+    // Make sure the file actually carries an audio track. We don't keep
+    // the index — `default_track()` is used downstream.
+    format
         .tracks()
         .iter()
         .position(|t| t.codec_params.codec != CODEC_TYPE_NULL)

@@ -27,6 +27,14 @@ export default function App() {
     void tauri.listModels().then(setModels).catch(() => {});
   }, [setModels]);
 
+  // Cmd/Ctrl+O dispatched from anywhere opens the file picker.
+  useEffect(() => {
+    const handler = () => void handleOpenFile();
+    window.addEventListener("yaudio:open-file", handler as EventListener);
+    return () => window.removeEventListener("yaudio:open-file", handler as EventListener);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   async function ensureModel(feature: AiFeature): Promise<ModelInfo | null> {
     const id = MODEL_FOR_FEATURE[feature];
     let m = modelForFeature(models, feature);
@@ -81,9 +89,18 @@ export default function App() {
     addEffect("AI Stem Split");
   }
 
+  function triggerExport() {
+    window.dispatchEvent(new CustomEvent("yaudio:export"));
+  }
+
   return (
     <div className="flex h-screen flex-col">
-      <Header onOpenModels={() => openModelManager(null)} />
+      <Header
+        onOpenModels={() => openModelManager(null)}
+        onOpenFile={handleOpenFile}
+        onMagicLink={() => setMagicOpen(true)}
+        onExport={triggerExport}
+      />
       <div className="flex flex-1 overflow-hidden">
         <MagicToolbar
           onMagicLink={() => setMagicOpen(true)}

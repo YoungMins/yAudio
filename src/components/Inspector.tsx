@@ -47,6 +47,14 @@ export function Inspector() {
     setSilences(ranges);
   }
 
+  // Allow the global File menu to trigger an export.
+  useEffect(() => {
+    const handler = () => void runExport();
+    window.addEventListener("yaudio:export", handler as EventListener);
+    return () => window.removeEventListener("yaudio:export", handler as EventListener);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [meta, clips, format, estimatedKbps]);
+
   async function runExport() {
     if (!meta || clips.length === 0) return;
     setExporting(true);

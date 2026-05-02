@@ -4,6 +4,8 @@ import { findOverlap, snapToEdges } from "../lib/snap";
 import { tauri } from "../lib/tauri";
 import { clipEnd, type Clip } from "../lib/timeline";
 import { useApp } from "../store/appStore";
+
+// (kept side-effect import for setState access in the spacebar handler)
 import { WaveformRenderer } from "./WaveformRenderer";
 
 interface Props {
@@ -36,6 +38,7 @@ export function MainCanvas({ onOpenFile }: Props) {
   const canRedo = useApp((s) => s.canRedo);
   const mutateTimeline = useApp((s) => s.mutateTimeline);
   const timeline = useApp((s) => s.timeline);
+  const isPlaying = useApp((s) => s.isPlaying);
 
   const totalDur = waveform?.meta.duration_secs ?? 0;
   const [loading, setLoading] = useState(false);
@@ -55,13 +58,14 @@ export function MainCanvas({ onOpenFile }: Props) {
     setViewStart(0);
   }, [waveform?.meta.path]);
 
-  // Auto-pan: keep playback cursor in view.
+  // Auto-pan only while playing — otherwise a user dragging the pan
+  // slider would fight this effect and the slider would snap back.
   useEffect(() => {
-    if (!waveform || !totalDur) return;
+    if (!waveform || !totalDur || !isPlaying) return;
     if (cursor < clampedViewStart || cursor > clampedViewStart + viewSpan) {
       setViewStart(Math.max(0, Math.min(totalDur - viewSpan, cursor - viewSpan / 2)));
     }
-  }, [cursor, clampedViewStart, viewSpan, totalDur, waveform]);
+  }, [cursor, clampedViewStart, viewSpan, totalDur, waveform, isPlaying]);
 
   useEffect(() => {
     const onDrag = async (e: DragEvent) => {
@@ -96,12 +100,22 @@ export function MainCanvas({ onOpenFile }: Props) {
       if (mod && e.key.toLowerCase() === "z") {
         e.preventDefault();
         mutateTimeline((t) => (e.shiftKey ? t.redo() : t.undo()));
+      } else if (mod && e.key.toLowerCase() === "e") {
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent("yaudio:export"));
+      } else if (mod && e.key.toLowerCase() === "o") {
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent("yaudio:open-file"));
       } else if ((e.key === "Backspace" || e.key === "Delete") && selection) {
         e.preventDefault();
         mutateTimeline((t) => t.deleteRange(selection.start, selection.end));
         setSelection(null);
       } else if (e.key === "Escape") {
         setSelection(null);
+      } else if (e.key === " ") {
+        // Spacebar toggles playback when not focused on a form control.
+        e.preventDefault();
+        useApp.setState((s) => ({ isPlaying: !s.isPlaying }));
       }
     }
     window.addEventListener("keydown", onKey);
@@ -400,11 +414,31 @@ export function MainCanvas({ onOpenFile }: Props) {
         />
       </div>
 
-      {/* Horizontal pan slider — only meaningful when zoomed in */}
-      <div className="flex h-7 items-center gap-3 border-t border-white/5 px-4">
-        <span className="font-mono text-[10px] text-zinc-500 tabular-nums">
-          {clampedViewStart.toFixed(1)}s
+      {/* Bottom controls: explicit Zoom slider + Pan slider, each labeled. */}
+      <div className="grid grid-cols-[60px_1fr_120px] items-center gap-3 border-t border-white/5 px-4 py-1.5 text-[10px] text-zinc-500">
+        <span className="font-mono">Zoom</span>
+        <input
+          type="range"
+          min={1}
+          max={64}
+          step={0.1}
+          value={zoom}
+          onChange={(e) => {
+            const newZoom = Number(e.target.value);
+            const center = clampedViewStart + viewSpan / 2;
+            const newSpan = totalDur / newZoom;
+            setViewStart(
+              Math.max(0, Math.min(totalDur - newSpan, center - newSpan / 2))
+            );
+            setZoom(newZoom);
+          }}
+          className="w-full accent-[var(--accent)]"
+        />
+        <span className="text-right font-mono tabular-nums">
+          ×{zoom.toFixed(1)}
         </span>
+
+        <span className="font-mono">Pan</span>
         <input
           type="range"
           min={0}
@@ -413,10 +447,10 @@ export function MainCanvas({ onOpenFile }: Props) {
           value={Math.min(clampedViewStart, sliderMax)}
           onChange={(e) => setViewStart(Number(e.target.value))}
           disabled={sliderMax <= 0}
-          className="flex-1 accent-[var(--accent)] disabled:opacity-30"
+          className="w-full accent-[var(--accent)] disabled:opacity-30"
         />
-        <span className="font-mono text-[10px] text-zinc-500 tabular-nums">
-          {(clampedViewStart + viewSpan).toFixed(1)}s / {totalDur.toFixed(1)}s
+        <span className="text-right font-mono tabular-nums">
+          {clampedViewStart.toFixed(1)}–{(clampedViewStart + viewSpan).toFixed(1)}s
         </span>
       </div>
 

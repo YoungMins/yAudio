@@ -34,10 +34,3 @@ custom-protocol = ["tauri/custom-protocol"]
 # Enable real ONNX-runtime inference. Requires the ORT dynamic
 # library on the host (downloaded automatically by ort's `load-dynamic`).
 onnx = ["yaudio-core/onnx"]
-
-[profile.release]
-codegen-units = 1
-lto = true
-opt-level = 3
-panic = "abort"
-strip = true

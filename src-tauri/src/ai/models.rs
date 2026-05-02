@@ -32,13 +32,13 @@ pub const REGISTRY: &[ModelDef] = &[
     ModelDef {
         id: "rnnoise",
         name: "GTCRN denoiser (ONNX)",
-        purpose: "AI Noise Clean — speech enhancement",
+        purpose: "AI Noise Clean — speech enhancement, removes background noise",
         // Mirror maintained by the sherpa-onnx project.
         url: Some(
             "https://github.com/k2-fsa/sherpa-onnx/releases/download/speech-enhancement-models/gtcrn_simple.onnx",
         ),
-        filename: "rnnoise.onnx",
-        size_bytes: 1_300_000,
+        filename: "gtcrn_simple.onnx",
+        size_bytes: 540_000,
         sha256: None,
         license: "Apache-2.0",
     },
@@ -122,8 +122,13 @@ pub fn list(app: &AppHandle) -> AudioResult<Vec<ModelInfo>> {
                 (ModelStatus::Downloading, None, None)
             } else if path.exists() {
                 let bytes = std::fs::metadata(&path).ok().map(|m| m.len());
+                // A non-empty file is treated as installed. The previous
+                // "size_bytes / 2" heuristic produced false positives
+                // whenever the registry's declared size drifted from the
+                // actual upstream file. SHA-256 verification (when set)
+                // is the real corruption check during download.
                 let status = match bytes {
-                    Some(b) if b >= def.size_bytes / 2 => ModelStatus::Installed,
+                    Some(b) if b >= 1_024 => ModelStatus::Installed,
                     Some(_) => ModelStatus::Corrupted,
                     None => ModelStatus::NotInstalled,
                 };

@@ -1,5 +1,5 @@
 import { Link2, MousePointer2, Scissors, Sparkles, ZoomIn, Mic2 } from "lucide-react";
-import { isFeatureReady } from "../lib/models";
+import { isFeatureReady, modelForFeature } from "../lib/models";
 import { useApp } from "../store/appStore";
 import { type AiFeature, type Tool } from "../types/audio";
 
@@ -20,7 +20,14 @@ export function MagicToolbar({ onMagicLink, onClean, onSplit }: Props) {
   const setTool = useApp((s) => s.setTool);
   const models = useApp((s) => s.models);
 
-  const isReady = (feature: AiFeature) => isFeatureReady(models, feature);
+  const featureLabel = (feature: AiFeature, fallback: string) => {
+    const m = modelForFeature(models, feature);
+    if (!m) return `${fallback} — 모델 다운로드 필요`;
+    if (m.status !== "installed") {
+      return `${m.name} (${m.purpose}) — 모델 다운로드 필요`;
+    }
+    return `${m.name} — ${m.purpose}`;
+  };
 
   return (
     <aside className="flex w-14 shrink-0 flex-col items-center gap-2 border-r border-white/5 py-4">
@@ -40,19 +47,23 @@ export function MagicToolbar({ onMagicLink, onClean, onSplit }: Props) {
       <div className="my-2 h-px w-8 bg-white/10" />
 
       <div className="flex flex-col items-center gap-1">
-        <button onClick={onMagicLink} className="tool-btn" title="Magic Link">
+        <button
+          onClick={onMagicLink}
+          className="tool-btn"
+          title="Magic Link — 외부 URL에서 오디오 추출 (yt-dlp 필요)"
+        >
           <Link2 size={18} />
         </button>
         <AiButton
           onClick={onClean}
-          ready={isReady("clean")}
-          title="AI Clean (RNNoise)"
+          ready={isFeatureReady(models, "clean")}
+          title={featureLabel("clean", "AI Clean")}
           icon={<Sparkles size={18} />}
         />
         <AiButton
           onClick={onSplit}
-          ready={isReady("split")}
-          title="Stem Split (Demucs)"
+          ready={isFeatureReady(models, "split")}
+          title={featureLabel("split", "Stem Split")}
           icon={<Mic2 size={18} />}
         />
       </div>
