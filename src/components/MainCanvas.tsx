@@ -1,11 +1,8 @@
-import { Cpu, FolderOpen, Loader2, Redo2, Undo2, ZoomIn, ZoomOut } from "lucide-react";
+import { Cpu, FolderOpen, Redo2, Undo2, ZoomIn, ZoomOut } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { findOverlap, snapToEdges } from "../lib/snap";
-import { tauri } from "../lib/tauri";
 import { clipEnd, type Clip } from "../lib/timeline";
 import { useApp } from "../store/appStore";
-
-// (kept side-effect import for setState access in the spacebar handler)
 import { WaveformRenderer } from "./WaveformRenderer";
 
 interface Props {
@@ -27,7 +24,6 @@ export function MainCanvas({ onOpenFile }: Props) {
   const waveform = useApp((s) => s.waveform);
   const models = useApp((s) => s.models);
   const openModelManager = useApp((s) => s.openModelManager);
-  const setWaveform = useApp((s) => s.setWaveform);
   const cursor = useApp((s) => s.cursorSecs);
   const setCursor = useApp((s) => s.setCursor);
   const selection = useApp((s) => s.selection);
@@ -41,7 +37,6 @@ export function MainCanvas({ onOpenFile }: Props) {
   const isPlaying = useApp((s) => s.isPlaying);
 
   const totalDur = waveform?.meta.duration_secs ?? 0;
-  const [loading, setLoading] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [viewStart, setViewStart] = useState(0);
   const [hoverHandle, setHoverHandle] = useState<"trim" | "move" | null>(null);
@@ -66,29 +61,6 @@ export function MainCanvas({ onOpenFile }: Props) {
       setViewStart(Math.max(0, Math.min(totalDur - viewSpan, cursor - viewSpan / 2)));
     }
   }, [cursor, clampedViewStart, viewSpan, totalDur, waveform, isPlaying]);
-
-  useEffect(() => {
-    const onDrag = async (e: DragEvent) => {
-      e.preventDefault();
-      const f = e.dataTransfer?.files?.[0];
-      if (!f) return;
-      setLoading(true);
-      try {
-        const path = (f as File & { path?: string }).path ?? f.name;
-        const wf = await tauri.extractWaveform(path, 2_000);
-        setWaveform(wf);
-      } finally {
-        setLoading(false);
-      }
-    };
-    const onOver = (e: DragEvent) => e.preventDefault();
-    window.addEventListener("drop", onDrag);
-    window.addEventListener("dragover", onOver);
-    return () => {
-      window.removeEventListener("drop", onDrag);
-      window.removeEventListener("dragover", onOver);
-    };
-  }, [setWaveform]);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -280,14 +252,6 @@ export function MainCanvas({ onOpenFile }: Props) {
   }
 
   const accent = theme === "dark" ? "#8B5CF6" : "#6D28D9";
-
-  if (loading) {
-    return (
-      <div className="flex flex-1 items-center justify-center">
-        <Loader2 size={32} className="animate-spin accent" />
-      </div>
-    );
-  }
 
   if (!waveform) {
     const noModels = models.length > 0 && models.every((m) => m.status !== "installed");
