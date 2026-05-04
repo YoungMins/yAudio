@@ -33,7 +33,7 @@ export default function App() {
   const [batchExportOpen, setBatchExportOpen] = useState(false);
   const [batchFadeOpen, setBatchFadeOpen] = useState(false);
   const [busy, setBusy] = useState<BatchProgress | null>(null);
-  const { audioRef } = useAudioPlayer();
+  useAudioPlayer();
 
   useEffect(() => {
     void tauri.listModels().then(setModels).catch(() => {});
@@ -243,7 +243,6 @@ export default function App() {
           setBusy(current < total ? { label: "Fading…", current, total } : null)
         }
       />
-      <audio ref={audioRef} preload="auto" />
     </div>
   );
 }

@@ -4,21 +4,68 @@ import { computeGainAtTime } from "../lib/fade";
 import { useApp } from "../store/appStore";
 
 /**
- * Owns the single `<audio>` element used for playback.
+ * Web-Audio-driven preview engine.
  *
- * Earlier versions wrapped the element through MediaElementAudioSourceNode →
- * GainNode → destination so a Web Audio graph could schedule a gain
- * envelope in advance. WebView2's handling of Tauri's `asset://` protocol
- * with that node graph can result in silent output, so we use a simpler
- * model that's known to work everywhere: drive the element's own
- * `volume` property from a requestAnimationFrame loop. The clipping at 1.0
- * means boosts above 0 dB only apply at export; sub-zero gains and the
- * full fade envelope are heard live.
+ * The previous incarnation routed an `<audio>` element through
+ * MediaElementAudioSourceNode → GainNode, but Tauri's `asset://` URLs
+ * combined with WebView2's cross-origin handling made that node graph
+ * silent. We sidestep the problem by fetching the file as bytes,
+ * decoding to an AudioBuffer, and playing through an AudioBufferSource.
+ * This also unlocks live EQ and full-range volume (no audio.volume clamp).
+ *
+ * Graph: AudioBufferSourceNode → eqLow → eqMid → eqHigh → fadeGain → trackGain → destination
+ *
+ * Manual cursor tracking: AudioBufferSourceNode has no `currentTime`,
+ * so we record `ctx.currentTime` at start and accumulate the offset.
  */
-export function useAudioPlayer() {
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const rafRef = useRef<number | null>(null);
+interface AudioGraph {
+  ctx: AudioContext;
+  eqLow: BiquadFilterNode;
+  eqMid: BiquadFilterNode;
+  eqHigh: BiquadFilterNode;
+  fadeGain: GainNode;
+  trackGain: GainNode;
+}
 
+function createGraph(): AudioGraph | null {
+  const Ctor =
+    window.AudioContext ??
+    (window as unknown as { webkitAudioContext?: typeof AudioContext })
+      .webkitAudioContext;
+  if (!Ctor) return null;
+  try {
+    const ctx = new Ctor();
+    const eqLow = ctx.createBiquadFilter();
+    eqLow.type = "lowshelf";
+    eqLow.frequency.value = 200;
+
+    const eqMid = ctx.createBiquadFilter();
+    eqMid.type = "peaking";
+    eqMid.frequency.value = 1000;
+    eqMid.Q.value = 1;
+
+    const eqHigh = ctx.createBiquadFilter();
+    eqHigh.type = "highshelf";
+    eqHigh.frequency.value = 4000;
+
+    const fadeGain = ctx.createGain();
+    const trackGain = ctx.createGain();
+
+    eqLow
+      .connect(eqMid)
+      .connect(eqHigh)
+      .connect(fadeGain)
+      .connect(trackGain)
+      .connect(ctx.destination);
+
+    return { ctx, eqLow, eqMid, eqHigh, fadeGain, trackGain };
+  } catch (e) {
+    console.error("Audio graph init failed", e);
+    return null;
+  }
+}
+
+export function useAudioPlayer() {
   const meta = useApp((s) => s.meta);
   const isPlaying = useApp((s) => s.isPlaying);
   const setPlaying = useApp((s) => s.setPlaying);
@@ -30,115 +77,241 @@ export function useAudioPlayer() {
   const fadeIn = timeline.timelineFadeIn;
   const fadeOut = timeline.timelineFadeOut;
   const trackGainDb = timeline.timelineGainDb;
-  const totalDur = meta?.duration_secs ?? 0;
+  const eq = timeline.timelineEq;
 
-  // Resolve the source URL whenever a new file is loaded.
+  const graphRef = useRef<AudioGraph | null>(null);
+  const bufferRef = useRef<AudioBuffer | null>(null);
+  const sourceRef = useRef<AudioBufferSourceNode | null>(null);
+  const startedAtCtxTimeRef = useRef(0);
+  const pausedAtBufferTimeRef = useRef(0);
+  const rafRef = useRef<number | null>(null);
+  const loadingPathRef = useRef<string | null>(null);
+
+  function ensureGraph(): AudioGraph | null {
+    if (!graphRef.current) graphRef.current = createGraph();
+    return graphRef.current;
+  }
+
+  function currentPlayhead(): number {
+    const g = graphRef.current;
+    if (!g) return pausedAtBufferTimeRef.current;
+    if (sourceRef.current) {
+      return (
+        pausedAtBufferTimeRef.current +
+        (g.ctx.currentTime - startedAtCtxTimeRef.current)
+      );
+    }
+    return pausedAtBufferTimeRef.current;
+  }
+
+  function applyFadeEnvelope(g: AudioGraph, scheduleFuture: boolean) {
+    const now = g.ctx.currentTime;
+    const t = currentPlayhead();
+    const totalDur = bufferRef.current?.duration ?? 0;
+    const param = g.fadeGain.gain;
+    param.cancelScheduledValues(now);
+    param.setValueAtTime(computeGainAtTime(t, totalDur, fadeIn, fadeOut), now);
+    if (!scheduleFuture || totalDur <= 0) return;
+    if (fadeIn > 0 && t < fadeIn) {
+      param.linearRampToValueAtTime(1, now + (fadeIn - t));
+    }
+    if (fadeOut > 0) {
+      const fadeOutStart = totalDur - fadeOut;
+      if (fadeOutStart > t) {
+        param.setValueAtTime(1, now + (fadeOutStart - t));
+        param.linearRampToValueAtTime(0, now + (totalDur - t));
+      } else if (t < totalDur) {
+        param.linearRampToValueAtTime(0, now + (totalDur - t));
+      }
+    }
+  }
+
+  function startSource(g: AudioGraph, fromTime: number) {
+    const buffer = bufferRef.current;
+    if (!buffer) return;
+    const source = g.ctx.createBufferSource();
+    source.buffer = buffer;
+    source.connect(g.eqLow);
+    source.onended = () => {
+      // Only react to natural end. User-driven stop already nulled sourceRef.
+      if (sourceRef.current === source) {
+        sourceRef.current = null;
+        pausedAtBufferTimeRef.current = buffer.duration;
+        setPlaying(false);
+      }
+    };
+    source.start(0, Math.max(0, Math.min(buffer.duration, fromTime)));
+    sourceRef.current = source;
+    startedAtCtxTimeRef.current = g.ctx.currentTime;
+    pausedAtBufferTimeRef.current = fromTime;
+  }
+
+  function stopSource() {
+    const source = sourceRef.current;
+    if (!source) return;
+    pausedAtBufferTimeRef.current = currentPlayhead();
+    sourceRef.current = null;
+    try {
+      source.stop();
+    } catch {
+      /* ignore: stop on already-ended source throws */
+    }
+    try {
+      source.disconnect();
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function startRaf() {
+    if (rafRef.current !== null) return;
+    const tick = () => {
+      const t = currentPlayhead();
+      const totalDur = bufferRef.current?.duration ?? 0;
+      if (!sourceRef.current) {
+        rafRef.current = null;
+        return;
+      }
+      if (totalDur > 0 && t >= totalDur) {
+        rafRef.current = null;
+        return;
+      }
+      setCursor(t);
+      rafRef.current = requestAnimationFrame(tick);
+    };
+    rafRef.current = requestAnimationFrame(tick);
+  }
+  function stopRaf() {
+    if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+    rafRef.current = null;
+  }
+
+  // Decode the buffer whenever the active source path changes
   useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
+    let cancelled = false;
+    stopSource();
+    stopRaf();
+    pausedAtBufferTimeRef.current = 0;
+
     if (!meta?.path) {
-      audio.removeAttribute("src");
-      audio.load();
+      bufferRef.current = null;
+      loadingPathRef.current = null;
       return;
     }
-    let url = meta.path;
+    if (loadingPathRef.current === meta.path && bufferRef.current) return;
+    loadingPathRef.current = meta.path;
+
     (async () => {
+      const graph = ensureGraph();
+      if (!graph) return;
       try {
-        const core = await import("@tauri-apps/api/core");
-        url = core.convertFileSrc(meta.path);
-      } catch {
-        // browser preview: leave the raw path
+        let url = meta.path;
+        try {
+          const core = await import("@tauri-apps/api/core");
+          url = core.convertFileSrc(meta.path);
+        } catch {
+          /* browser preview: leave the raw path (likely 404, but won't crash) */
+        }
+        const resp = await fetch(url);
+        const arrayBuffer = await resp.arrayBuffer();
+        const decoded = await graph.ctx.decodeAudioData(arrayBuffer);
+        if (cancelled) return;
+        bufferRef.current = decoded;
+
+        // If the user already pressed play while we were loading, start now
+        if (useApp.getState().isPlaying) {
+          await graph.ctx.resume();
+          startSource(graph, 0);
+          applyFadeEnvelope(graph, true);
+          startRaf();
+        }
+      } catch (e) {
+        console.error("Audio decode failed", e);
+        bufferRef.current = null;
       }
-      audio.src = url;
-      audio.load();
     })();
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [meta?.path]);
 
-  // Mirror play/pause from store → element
+  // Play / pause sync
   useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio || !meta) return;
+    const graph = ensureGraph();
+    if (!graph) return;
     if (isPlaying) {
-      audio.play().catch(() => setPlaying(false));
+      void graph.ctx.resume();
+      if (!bufferRef.current) return; // will start when buffer finishes loading
+      if (sourceRef.current) return; // already playing
+      startSource(graph, pausedAtBufferTimeRef.current);
+      applyFadeEnvelope(graph, true);
+      startRaf();
     } else {
-      audio.pause();
+      stopSource();
+      stopRaf();
+      applyFadeEnvelope(graph, false);
     }
-  }, [isPlaying, meta, setPlaying]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPlaying]);
 
-  // Mirror element events → store
+  // External seek (e.g. clicking the canvas)
   useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    const onTime = () => setCursor(audio.currentTime);
-    const onEnded = () => setPlaying(false);
-    audio.addEventListener("timeupdate", onTime);
-    audio.addEventListener("ended", onEnded);
-    return () => {
-      audio.removeEventListener("timeupdate", onTime);
-      audio.removeEventListener("ended", onEnded);
-    };
-  }, [setCursor, setPlaying]);
-
-  // External seek (e.g. clicking the canvas) → element
-  useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    if (Math.abs(audio.currentTime - cursorSecs) > 0.05) {
-      audio.currentTime = cursorSecs;
+    const graph = graphRef.current;
+    if (!graph) return;
+    if (Math.abs(currentPlayhead() - cursorSecs) < 0.05) return;
+    const wasPlaying = !!sourceRef.current;
+    if (wasPlaying) {
+      stopSource();
+      pausedAtBufferTimeRef.current = cursorSecs;
+      startSource(graph, cursorSecs);
+      applyFadeEnvelope(graph, true);
+    } else {
+      pausedAtBufferTimeRef.current = cursorSecs;
+      applyFadeEnvelope(graph, false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cursorSecs]);
 
-  // ── Live gain envelope via audio.volume ─────────────────────────
+  // Update fade envelope whenever fade values mutate
   useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
+    const graph = graphRef.current;
+    if (!graph) return;
+    applyFadeEnvelope(graph, !!sourceRef.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fadeIn, fadeOut, timelineRev]);
 
-    function applyGainNow() {
-      if (!audio) return;
-      const t = audio.currentTime;
-      const fade = computeGainAtTime(t, totalDur, fadeIn, fadeOut);
-      const linear = fade * dbToLinear(trackGainDb);
-      // audio.volume tops out at 1.0 — boosts above 0 dB apply only on export
-      audio.volume = Math.max(0, Math.min(1, linear));
+  // Track gain (no clamp, full ±dB respected)
+  useEffect(() => {
+    const graph = graphRef.current;
+    if (graph) {
+      graph.trackGain.gain.setTargetAtTime(
+        dbToLinear(trackGainDb),
+        graph.ctx.currentTime,
+        0.01
+      );
     }
+  }, [trackGainDb]);
 
-    function tick() {
-      applyGainNow();
-      if (audio && !audio.paused) {
-        rafRef.current = requestAnimationFrame(tick);
-      } else {
-        rafRef.current = null;
-      }
-    }
+  // EQ live updates
+  useEffect(() => {
+    const graph = graphRef.current;
+    if (!graph) return;
+    const now = graph.ctx.currentTime;
+    graph.eqLow.gain.setTargetAtTime(eq.low, now, 0.01);
+    graph.eqMid.gain.setTargetAtTime(eq.mid, now, 0.01);
+    graph.eqHigh.gain.setTargetAtTime(eq.high, now, 0.01);
+  }, [eq.low, eq.mid, eq.high]);
 
-    function start() {
-      if (rafRef.current === null) tick();
-    }
-    function stop() {
-      if (rafRef.current !== null) {
-        cancelAnimationFrame(rafRef.current);
-        rafRef.current = null;
-      }
-      applyGainNow(); // pin gain at the paused position too
-    }
-
-    audio.addEventListener("play", start);
-    audio.addEventListener("pause", stop);
-    audio.addEventListener("seeked", applyGainNow);
-    // Apply once on mount/dependency change so paused tweaks are heard
-    applyGainNow();
-    if (!audio.paused) start();
-
+  // Cleanup on unmount
+  useEffect(() => {
     return () => {
-      audio.removeEventListener("play", start);
-      audio.removeEventListener("pause", stop);
-      audio.removeEventListener("seeked", applyGainNow);
-      if (rafRef.current !== null) {
-        cancelAnimationFrame(rafRef.current);
-        rafRef.current = null;
-      }
+      stopSource();
+      stopRaf();
+      void graphRef.current?.ctx.close();
+      graphRef.current = null;
+      bufferRef.current = null;
     };
-  }, [fadeIn, fadeOut, totalDur, trackGainDb, timelineRev]);
-
-  return { audioRef };
+  }, []);
 }

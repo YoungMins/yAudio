@@ -254,7 +254,7 @@ export function Inspector() {
             </div>
             {trackGainDb > 0 && (
               <p className="text-[10px] text-zinc-500">
-                Boost above 0 dB applies fully on export; preview clamps at unity.
+                Boost above 0 dB plays at full strength — watch for clipping.
               </p>
             )}
           </div>
@@ -299,7 +299,7 @@ export function Inspector() {
               </button>
             </div>
             <p className="text-[10px] text-zinc-500">
-              EQ applies on export. Live preview is unfiltered.
+              Heard live during preview and applied identically on export.
             </p>
           </div>
         ) : (
