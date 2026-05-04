@@ -12,6 +12,9 @@ function clip(id: number, start: number, duration: number): Clip {
     fadeIn: 0,
     fadeOut: 0,
     gainDb: 0,
+    eqLowDb: 0,
+    eqMidDb: 0,
+    eqHighDb: 0,
   };
 }
 

@@ -7,6 +7,7 @@ import {
   Sparkles,
   Square,
   VolumeX,
+  Wand2,
   Waves,
 } from "lucide-react";
 import { useMemo } from "react";
@@ -19,6 +20,7 @@ interface Props {
   onBatchClean: () => void;
   onBatchTrimSilence: () => void;
   onBatchFade: () => void;
+  onBatchNormalize: () => void;
   busy?: { label: string; current: number; total: number } | null;
 }
 
@@ -33,6 +35,7 @@ export function FileList({
   onBatchClean,
   onBatchTrimSilence,
   onBatchFade,
+  onBatchNormalize,
   busy,
 }: Props) {
   const library = useApp((s) => s.library);
@@ -157,7 +160,7 @@ export function FileList({
             <p className="mb-1 text-zinc-500">
               Batch <span className="font-mono text-zinc-400">({selectedCount})</span>
             </p>
-            <div className="grid grid-cols-2 gap-1">
+            <div className="grid grid-cols-3 gap-1">
               <BatchBtn
                 onClick={onBatchExport}
                 disabled={selectedCount === 0}
@@ -169,6 +172,12 @@ export function FileList({
                 disabled={selectedCount === 0}
                 label="Fade"
                 icon={<Waves size={12} />}
+              />
+              <BatchBtn
+                onClick={onBatchNormalize}
+                disabled={selectedCount === 0}
+                label="Normalize"
+                icon={<Wand2 size={12} />}
               />
               <BatchBtn
                 onClick={onBatchClean}

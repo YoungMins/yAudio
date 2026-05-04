@@ -4,6 +4,7 @@
 //! Source data comes through a [`SourceProvider`] so unit tests can
 //! supply deterministic samples without touching the filesystem.
 
+use crate::audio::biquad::Biquad;
 use crate::audio::decoder;
 use crate::audio::editor::{Clip, Timeline};
 use crate::error::{AudioError, AudioResult};
@@ -43,10 +44,37 @@ pub fn render_mono(
         render_clip(clip, src, sample_rate, &mut out)?;
     }
 
+    apply_eq_if_set(&mut out, timeline, sample_rate);
+
     for s in &mut out {
         *s = s.clamp(-1.0, 1.0);
     }
     Ok(out)
+}
+
+/// Run the buffer through a 3-band EQ if any band is non-zero. EQ
+/// values come from the first clip (timeline-wide). Frequencies follow
+/// a simple low/mid/high tone-control split: 200 Hz low shelf, 1 kHz
+/// peaking, 4 kHz high shelf, all at Q ≈ 0.7071.
+fn apply_eq_if_set(out: &mut [f32], timeline: &Timeline, sample_rate: u32) {
+    let Some(first) = timeline.clips().first() else { return };
+    let (low, mid, high) = (first.eq_low_db, first.eq_mid_db, first.eq_high_db);
+    if low.abs() < 1e-3 && mid.abs() < 1e-3 && high.abs() < 1e-3 {
+        return;
+    }
+    let q = std::f32::consts::FRAC_1_SQRT_2;
+    if low.abs() >= 1e-3 {
+        let mut bq = Biquad::low_shelf(200.0, q, low, sample_rate);
+        bq.process_buffer(out);
+    }
+    if mid.abs() >= 1e-3 {
+        let mut bq = Biquad::peaking(1_000.0, q, mid, sample_rate);
+        bq.process_buffer(out);
+    }
+    if high.abs() >= 1e-3 {
+        let mut bq = Biquad::high_shelf(4_000.0, q, high, sample_rate);
+        bq.process_buffer(out);
+    }
 }
 
 fn render_clip(

@@ -78,9 +78,21 @@ describe("Timeline — cut and paste", () => {
 
   it("paste inserts at the requested offset", () => {
     const t = tlWith([[0, 2]]);
+    const blank = {
+      id: 0,
+      sourcePath: "x",
+      duration: 1,
+      sourceOffset: 0,
+      fadeIn: 0,
+      fadeOut: 0,
+      gainDb: 0,
+      eqLowDb: 0,
+      eqMidDb: 0,
+      eqHighDb: 0,
+    };
     const clipboard = [
-      { id: 0, sourcePath: "x", start: 0, duration: 1, sourceOffset: 0, fadeIn: 0, fadeOut: 0, gainDb: 0 },
-      { id: 0, sourcePath: "x", start: 1, duration: 1, sourceOffset: 0, fadeIn: 0, fadeOut: 0, gainDb: 0 },
+      { ...blank, start: 0 },
+      { ...blank, start: 1 },
     ];
     t.paste(5, clipboard);
     expect(t.clips.map((c) => c.start)).toEqual([0, 5, 6]);
@@ -206,6 +218,68 @@ describe("Timeline — crossfade", () => {
     t.crossfadeAt(2, 0.5);
     expect(t.clips[0].fadeOut).toBeCloseTo(0.5);
     expect(t.clips[1].fadeIn).toBeCloseTo(0.5);
+  });
+});
+
+describe("Timeline — track gain", () => {
+  it("applyTimelineGainDb sets gain on every clip uniformly", () => {
+    const t = tlWith([
+      [0, 5],
+      [5, 5],
+    ]);
+    expect(t.applyTimelineGainDb(-3)).toBe(true);
+    for (const c of t.clips) expect(c.gainDb).toBeCloseTo(-3);
+  });
+
+  it("timelineGainDb returns the current uniform gain", () => {
+    const t = tlWith([[0, 5]]);
+    t.applyTimelineGainDb(2);
+    expect(t.timelineGainDb).toBeCloseTo(2);
+  });
+
+  it("returns 0 dB on an empty timeline", () => {
+    expect(new Timeline().timelineGainDb).toBe(0);
+  });
+
+  it("repeated identical applies are idempotent (no extra undo state)", () => {
+    const t = tlWith([[0, 5]]);
+    t.applyTimelineGainDb(-3);
+    expect(t.applyTimelineGainDb(-3)).toBe(false);
+  });
+
+  it("undo reverts the gain change", () => {
+    const t = tlWith([[0, 5]]);
+    t.applyTimelineGainDb(6);
+    expect(t.timelineGainDb).toBeCloseTo(6);
+    t.undo();
+    expect(t.timelineGainDb).toBe(0);
+  });
+});
+
+describe("Timeline — track EQ", () => {
+  it("applyTimelineEq sets bands on every clip uniformly", () => {
+    const t = tlWith([
+      [0, 2],
+      [2, 2],
+    ]);
+    expect(t.applyTimelineEq(3, -2, 4)).toBe(true);
+    for (const c of t.clips) {
+      expect(c.eqLowDb).toBeCloseTo(3);
+      expect(c.eqMidDb).toBeCloseTo(-2);
+      expect(c.eqHighDb).toBeCloseTo(4);
+    }
+    expect(t.timelineEq).toEqual({ low: 3, mid: -2, high: 4 });
+  });
+
+  it("returns 0/0/0 on empty timeline", () => {
+    expect(new Timeline().timelineEq).toEqual({ low: 0, mid: 0, high: 0 });
+  });
+
+  it("undo reverts the EQ change", () => {
+    const t = tlWith([[0, 5]]);
+    t.applyTimelineEq(6, 3, 6);
+    t.undo();
+    expect(t.timelineEq).toEqual({ low: 0, mid: 0, high: 0 });
   });
 });
 

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { normalizationGainDb, peakOfWaveform } from "./lib/audioMath";
 import { BatchExportDialog } from "./components/BatchExportDialog";
 import { BatchFadeDialog } from "./components/BatchFadeDialog";
 import { FileList } from "./components/FileList";
@@ -159,6 +160,22 @@ export default function App() {
     setBusy(null);
   }
 
+  function batchNormalize() {
+    const docs = selectedDocs();
+    if (docs.length === 0) return;
+    setBusy({ label: "Normalize…", current: 0, total: docs.length });
+    for (let i = 0; i < docs.length; i++) {
+      const doc = docs[i];
+      const peak = peakOfWaveform(doc.waveform.peaks);
+      const db = Math.max(-24, Math.min(12, normalizationGainDb(peak, -1)));
+      doc.timeline.applyTimelineGainDb(db);
+      setBusy({ label: "Normalize…", current: i + 1, total: docs.length });
+    }
+    const id = useApp.getState().activeId;
+    if (id) useApp.getState().setActiveDocument(id);
+    setBusy(null);
+  }
+
   async function batchTrimSilence() {
     const docs = selectedDocs();
     if (docs.length === 0) return;
@@ -200,6 +217,7 @@ export default function App() {
           onAddFiles={handleOpenFiles}
           onBatchExport={() => setBatchExportOpen(true)}
           onBatchFade={() => setBatchFadeOpen(true)}
+          onBatchNormalize={batchNormalize}
           onBatchClean={batchClean}
           onBatchTrimSilence={batchTrimSilence}
           busy={busy}

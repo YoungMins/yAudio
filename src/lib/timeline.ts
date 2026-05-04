@@ -15,6 +15,9 @@ export interface Clip {
   fadeIn: number;
   fadeOut: number;
   gainDb: number;
+  eqLowDb: number;
+  eqMidDb: number;
+  eqHighDb: number;
 }
 
 export interface ClipSpec {
@@ -25,6 +28,9 @@ export interface ClipSpec {
   fadeIn?: number;
   fadeOut?: number;
   gainDb?: number;
+  eqLowDb?: number;
+  eqMidDb?: number;
+  eqHighDb?: number;
 }
 
 export const clipEnd = (c: Clip): number => c.start + c.duration;
@@ -40,6 +46,9 @@ export function toExportClip(c: Clip) {
     fade_in: c.fadeIn,
     fade_out: c.fadeOut,
     gain_db: c.gainDb,
+    eq_low_db: c.eqLowDb,
+    eq_mid_db: c.eqMidDb,
+    eq_high_db: c.eqHighDb,
   };
 }
 
@@ -86,6 +95,9 @@ export class Timeline {
       fadeIn: spec.fadeIn ?? 0,
       fadeOut: spec.fadeOut ?? 0,
       gainDb: spec.gainDb ?? 0,
+      eqLowDb: spec.eqLowDb ?? 0,
+      eqMidDb: spec.eqMidDb ?? 0,
+      eqHighDb: spec.eqHighDb ?? 0,
     };
     this._clips.push(clip);
     this.sort();
@@ -171,6 +183,9 @@ export class Timeline {
         fadeIn: 0,
         fadeOut: 0,
         gainDb: clip.gainDb,
+        eqLowDb: clip.eqLowDb,
+        eqMidDb: clip.eqMidDb,
+        eqHighDb: clip.eqHighDb,
       });
     }
     return out;
@@ -283,6 +298,56 @@ export class Timeline {
   applyTimelineFadeOut(secs: number): boolean {
     const last = this._clips[this._clips.length - 1];
     return last ? this.setFadeOut(last.id, secs) : false;
+  }
+
+  /**
+   * Apply the same gain (dB) to every clip. Used as a track-wide
+   * "Volume" control — set to 0 dB to leave audio at its native level,
+   * negative attenuates, positive boosts (boost above 0 dB only matters
+   * at export time because audio.volume tops out at 1.0).
+   */
+  applyTimelineGainDb(db: number): boolean {
+    if (this._clips.length === 0) return false;
+    const same = this._clips.every((c) => Math.abs(c.gainDb - db) < 1e-9);
+    if (same) return false;
+    this.snapshot();
+    for (const c of this._clips) c.gainDb = db;
+    return true;
+  }
+
+  /** Current track-wide gain (reads the first clip; 0 dB on empty). */
+  get timelineGainDb(): number {
+    return this._clips[0]?.gainDb ?? 0;
+  }
+
+  /**
+   * Apply track-wide 3-band EQ. Stored on every clip uniformly so a
+   * future per-clip UI is just a flag away. Setting all three to 0
+   * skips biquad processing at render time.
+   */
+  applyTimelineEq(lowDb: number, midDb: number, highDb: number): boolean {
+    if (this._clips.length === 0) return false;
+    const same = this._clips.every(
+      (c) =>
+        Math.abs(c.eqLowDb - lowDb) < 1e-6 &&
+        Math.abs(c.eqMidDb - midDb) < 1e-6 &&
+        Math.abs(c.eqHighDb - highDb) < 1e-6
+    );
+    if (same) return false;
+    this.snapshot();
+    for (const c of this._clips) {
+      c.eqLowDb = lowDb;
+      c.eqMidDb = midDb;
+      c.eqHighDb = highDb;
+    }
+    return true;
+  }
+
+  /** Current EQ band gains, or all zeros when empty. */
+  get timelineEq(): { low: number; mid: number; high: number } {
+    const c = this._clips[0];
+    if (!c) return { low: 0, mid: 0, high: 0 };
+    return { low: c.eqLowDb, mid: c.eqMidDb, high: c.eqHighDb };
   }
 
   /** Current fade-in on the first clip, or 0 when the timeline is empty. */

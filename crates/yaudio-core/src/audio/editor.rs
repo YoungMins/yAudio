@@ -19,6 +19,14 @@ pub struct Clip {
     pub fade_in: f64,
     pub fade_out: f64,
     pub gain_db: f32,
+    /// Track-wide low-shelf gain (dB). All clips in a doc share the same
+    /// EQ values; per-clip storage keeps the wire format symmetric.
+    #[serde(default)]
+    pub eq_low_db: f32,
+    #[serde(default)]
+    pub eq_mid_db: f32,
+    #[serde(default)]
+    pub eq_high_db: f32,
 }
 
 impl Clip {
@@ -80,6 +88,9 @@ impl Timeline {
             fade_in: 0.0,
             fade_out: 0.0,
             gain_db: 0.0,
+            eq_low_db: 0.0,
+            eq_mid_db: 0.0,
+            eq_high_db: 0.0,
         };
         self.clips.push(clip);
         self.clips.sort_by(|a, b| a.start.total_cmp(&b.start));
@@ -128,6 +139,9 @@ impl Timeline {
                     fade_in: 0.0,
                     fade_out: clip.fade_out,
                     gain_db: clip.gain_db,
+                    eq_low_db: clip.eq_low_db,
+                    eq_mid_db: clip.eq_mid_db,
+                    eq_high_db: clip.eq_high_db,
                     source_path: clip.source_path.clone(),
                 };
                 next.push(left);
@@ -180,6 +194,9 @@ impl Timeline {
                 fade_in: 0.0,
                 fade_out: 0.0,
                 gain_db: clip.gain_db,
+                eq_low_db: clip.eq_low_db,
+                eq_mid_db: clip.eq_mid_db,
+                eq_high_db: clip.eq_high_db,
             });
         }
         out
@@ -339,6 +356,36 @@ impl Timeline {
         }
     }
 
+    /// Apply the same EQ band gains (dB each) to every clip. Setting all
+    /// three to 0 is a passthrough (the render pass skips biquads entirely).
+    pub fn apply_timeline_eq(&mut self, low_db: f32, mid_db: f32, high_db: f32) -> bool {
+        if self.clips.is_empty() {
+            return false;
+        }
+        let same = self.clips.iter().all(|c| {
+            (c.eq_low_db - low_db).abs() < 1e-6
+                && (c.eq_mid_db - mid_db).abs() < 1e-6
+                && (c.eq_high_db - high_db).abs() < 1e-6
+        });
+        if same {
+            return false;
+        }
+        self.snapshot();
+        for c in self.clips.iter_mut() {
+            c.eq_low_db = low_db;
+            c.eq_mid_db = mid_db;
+            c.eq_high_db = high_db;
+        }
+        true
+    }
+
+    pub fn timeline_eq(&self) -> (f32, f32, f32) {
+        match self.clips.first() {
+            Some(c) => (c.eq_low_db, c.eq_mid_db, c.eq_high_db),
+            None => (0.0, 0.0, 0.0),
+        }
+    }
+
     pub fn timeline_fade_in(&self) -> f64 {
         self.clips.first().map(|c| c.fade_in).unwrap_or(0.0)
     }
@@ -459,6 +506,9 @@ mod tests {
             fade_in: 0.0,
             fade_out: 0.0,
             gain_db: 0.0,
+            eq_low_db: 0.0,
+            eq_mid_db: 0.0,
+            eq_high_db: 0.0,
         }];
         clipboard.push(Clip {
             start: 1.0,

@@ -1,14 +1,18 @@
 import {
+  Gauge,
   Layers,
   Loader2,
   Power,
   RotateCcw,
   Scissors,
+  SlidersHorizontal,
   Trash2,
   Volume2,
+  Wand2,
   Waves,
 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { normalizationGainDb, peakOfWaveform } from "../lib/audioMath";
 import { tauri } from "../lib/tauri";
 import { toExportClip } from "../lib/timeline";
 import { useApp } from "../store/appStore";
@@ -33,12 +37,34 @@ export function Inspector() {
   const timeline = useApp((s) => s.timeline);
   const mutateTimeline = useApp((s) => s.mutateTimeline);
 
+  const waveform = useApp((s) => s.waveform);
+
   // Read live fade values from the active timeline. The first/last clip's
   // fade-in/fade-out is the "track envelope".
   const fadeIn = timeline.timelineFadeIn;
   const fadeOut = timeline.timelineFadeOut;
+  const trackGainDb = timeline.timelineGainDb;
+  const eq = timeline.timelineEq;
   const totalDur = meta?.duration_secs ?? 0;
   const fadeMax = Math.max(0.1, Math.min(10, totalDur / 2));
+
+  function setEqBand(band: "low" | "mid" | "high", value: number) {
+    mutateTimeline((t) =>
+      t.applyTimelineEq(
+        band === "low" ? value : eq.low,
+        band === "mid" ? value : eq.mid,
+        band === "high" ? value : eq.high
+      )
+    );
+  }
+
+  function runNormalize() {
+    if (!waveform) return;
+    const peak = peakOfWaveform(waveform.peaks);
+    const target = -1; // dBFS — leave 1 dB of headroom
+    const db = Math.max(-24, Math.min(12, normalizationGainDb(peak, target)));
+    mutateTimeline((t) => t.applyTimelineGainDb(db));
+  }
 
   const [targetMb, setTargetMb] = useState(3);
   const [estimatedKbps, setEstimatedKbps] = useState<number | null>(null);
@@ -187,6 +213,100 @@ export function Inspector() {
         )}
       </Section>
 
+      <Section title="Volume" icon={<Gauge size={14} />}>
+        {meta && clips.length > 0 ? (
+          <div className="space-y-2 text-xs">
+            <label className="flex items-center justify-between">
+              <span className="text-zinc-400">Track gain</span>
+              <span className="font-mono accent">
+                {trackGainDb >= 0 ? "+" : ""}
+                {trackGainDb.toFixed(1)} dB
+              </span>
+            </label>
+            <input
+              type="range"
+              min={-24}
+              max={12}
+              step={0.5}
+              value={trackGainDb}
+              onChange={(e) =>
+                mutateTimeline((t) =>
+                  t.applyTimelineGainDb(Number(e.target.value))
+                )
+              }
+              className="w-full accent-[var(--accent)]"
+            />
+            <div className="flex gap-1">
+              <button
+                onClick={runNormalize}
+                className="btn-primary flex flex-1 items-center justify-center gap-1 py-1.5 text-[11px]"
+                title="Set gain so the loudest peak hits about -1 dBFS"
+              >
+                <Wand2 size={12} /> Normalize
+              </button>
+              <button
+                onClick={() => mutateTimeline((t) => t.applyTimelineGainDb(0))}
+                className="rounded-glass border border-white/5 px-3 text-[11px] text-zinc-300 hover:bg-white/5"
+                title="Reset to 0 dB"
+              >
+                <RotateCcw size={12} />
+              </button>
+            </div>
+            {trackGainDb > 0 && (
+              <p className="text-[10px] text-zinc-500">
+                Boost above 0 dB applies fully on export; preview clamps at unity.
+              </p>
+            )}
+          </div>
+        ) : (
+          <p className="text-xs text-zinc-500">파일을 열면 볼륨을 조절할 수 있습니다.</p>
+        )}
+      </Section>
+
+      <Section title="Equalizer" icon={<SlidersHorizontal size={14} />}>
+        {meta && clips.length > 0 ? (
+          <div className="space-y-3 text-xs">
+            <EqBand label="Low" hint="200 Hz shelf" value={eq.low} onChange={(v) => setEqBand("low", v)} />
+            <EqBand label="Mid" hint="1 kHz peak" value={eq.mid} onChange={(v) => setEqBand("mid", v)} />
+            <EqBand label="High" hint="4 kHz shelf" value={eq.high} onChange={(v) => setEqBand("high", v)} />
+            <div className="flex items-center justify-between gap-1">
+              <div className="flex gap-1">
+                {[
+                  { label: "Flat", v: [0, 0, 0] },
+                  { label: "Bright", v: [-1, 0, 4] },
+                  { label: "Warm", v: [4, 0, -2] },
+                  { label: "Vocal", v: [-2, 3, 1] },
+                ].map((p) => (
+                  <button
+                    key={p.label}
+                    onClick={() =>
+                      mutateTimeline((t) =>
+                        t.applyTimelineEq(p.v[0], p.v[1], p.v[2])
+                      )
+                    }
+                    className="rounded border border-white/5 px-2 py-0.5 text-[10px] text-zinc-300 hover:bg-white/5"
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+              <button
+                onClick={() => mutateTimeline((t) => t.applyTimelineEq(0, 0, 0))}
+                className="rounded-glass border border-white/5 px-2 py-0.5 text-[10px] text-zinc-300 hover:bg-white/5"
+                title="Reset all bands"
+              >
+                <RotateCcw size={11} />
+              </button>
+            </div>
+            <p className="text-[10px] text-zinc-500">
+              EQ applies on export. Live preview is unfiltered.
+            </p>
+          </div>
+        ) : (
+          <p className="text-xs text-zinc-500">파일을 열면 EQ를 조절할 수 있습니다.</p>
+        )}
+      </Section>
+
       <Section title="Smart Compression" icon={<Volume2 size={14} />}>
         <div className="space-y-2">
           <label className="flex items-center justify-between text-xs">
@@ -284,6 +404,41 @@ export function Inspector() {
 
       <Section title="Effect Stack" icon={<Layers size={14} />}>
         <ul className="space-y-1">
+          {(Math.abs(eq.low) > 1e-3 || Math.abs(eq.mid) > 1e-3 || Math.abs(eq.high) > 1e-3) && (
+            <li className="glass flex items-center justify-between px-3 py-2">
+              <span className="text-xs">
+                EQ{" "}
+                <span className="font-mono text-zinc-500">
+                  {fmtBand(eq.low)} / {fmtBand(eq.mid)} / {fmtBand(eq.high)}
+                </span>
+              </span>
+              <button
+                onClick={() => mutateTimeline((t) => t.applyTimelineEq(0, 0, 0))}
+                className="tool-btn h-7 w-7"
+                title="Reset EQ"
+              >
+                <RotateCcw size={12} />
+              </button>
+            </li>
+          )}
+          {Math.abs(trackGainDb) > 1e-3 && (
+            <li className="glass flex items-center justify-between px-3 py-2">
+              <span className="text-xs">
+                Volume{" "}
+                <span className="font-mono text-zinc-500">
+                  {trackGainDb >= 0 ? "+" : ""}
+                  {trackGainDb.toFixed(1)} dB
+                </span>
+              </span>
+              <button
+                onClick={() => mutateTimeline((t) => t.applyTimelineGainDb(0))}
+                className="tool-btn h-7 w-7"
+                title="Reset volume"
+              >
+                <RotateCcw size={12} />
+              </button>
+            </li>
+          )}
           {fadeIn > 0 && (
             <li className="glass flex items-center justify-between px-3 py-2">
               <span className="text-xs">
@@ -327,7 +482,13 @@ export function Inspector() {
               </button>
             </li>
           ))}
-          {effects.length === 0 && fadeIn === 0 && fadeOut === 0 && (
+          {effects.length === 0 &&
+            fadeIn === 0 &&
+            fadeOut === 0 &&
+            Math.abs(trackGainDb) < 1e-3 &&
+            Math.abs(eq.low) < 1e-3 &&
+            Math.abs(eq.mid) < 1e-3 &&
+            Math.abs(eq.high) < 1e-3 && (
             <li className="flex items-center gap-2 text-xs text-zinc-500">
               <Trash2 size={12} /> 효과가 비어 있습니다.
             </li>
@@ -390,6 +551,46 @@ function FadeControl({
         max={max}
         step={0.05}
         value={Math.min(value, max)}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="mt-1 w-full accent-[var(--accent)]"
+      />
+    </div>
+  );
+}
+
+function fmtBand(db: number): string {
+  if (Math.abs(db) < 1e-3) return "0";
+  return `${db >= 0 ? "+" : ""}${db.toFixed(1)}`;
+}
+
+function EqBand({
+  label,
+  hint,
+  value,
+  onChange,
+}: {
+  label: string;
+  hint: string;
+  value: number;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <div>
+      <label className="flex items-center justify-between">
+        <span className="text-zinc-400">
+          {label} <span className="text-zinc-600">· {hint}</span>
+        </span>
+        <span className="font-mono accent">
+          {value >= 0 ? "+" : ""}
+          {value.toFixed(1)} dB
+        </span>
+      </label>
+      <input
+        type="range"
+        min={-12}
+        max={12}
+        step={0.5}
+        value={value}
         onChange={(e) => onChange(Number(e.target.value))}
         className="mt-1 w-full accent-[var(--accent)]"
       />
