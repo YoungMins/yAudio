@@ -1,4 +1,5 @@
 import {
+  Activity,
   Gauge,
   Layers,
   Loader2,
@@ -14,7 +15,7 @@ import {
 import { useEffect, useState } from "react";
 import { normalizationGainDb, peakOfWaveform } from "../lib/audioMath";
 import { tauri } from "../lib/tauri";
-import { toExportClip } from "../lib/timeline";
+import { toExportClip, type CompressorState } from "../lib/timeline";
 import { useApp } from "../store/appStore";
 import type { AudioFormat } from "../types/audio";
 
@@ -45,8 +46,15 @@ export function Inspector() {
   const fadeOut = timeline.timelineFadeOut;
   const trackGainDb = timeline.timelineGainDb;
   const eq = timeline.timelineEq;
+  const comp = timeline.timelineCompressor;
   const totalDur = meta?.duration_secs ?? 0;
   const fadeMax = Math.max(0.1, Math.min(10, totalDur / 2));
+
+  function updateCompressor(patch: Partial<CompressorState>) {
+    mutateTimeline((t) =>
+      t.applyTimelineCompressor({ ...comp, ...patch })
+    );
+  }
 
   function setEqBand(band: "low" | "mid" | "high", value: number) {
     mutateTimeline((t) =>
@@ -307,6 +315,95 @@ export function Inspector() {
         )}
       </Section>
 
+      <Section title="Compressor" icon={<Activity size={14} />}>
+        {meta && clips.length > 0 ? (
+          <div className="space-y-3 text-xs">
+            <div className="flex items-center justify-between">
+              <span className="text-zinc-400">Bypass</span>
+              <button
+                onClick={() => updateCompressor({ enabled: !comp.enabled })}
+                className={`tool-btn h-7 px-2 text-[11px] ${
+                  comp.enabled ? "active" : ""
+                }`}
+                style={{ width: "auto" }}
+                title={comp.enabled ? "Disable compressor" : "Enable compressor"}
+              >
+                <Power size={12} className="mr-1" />
+                {comp.enabled ? "On" : "Off"}
+              </button>
+            </div>
+            <CompSlider
+              label="Threshold"
+              unit="dB"
+              min={-60}
+              max={0}
+              step={0.5}
+              value={comp.thresholdDb}
+              disabled={!comp.enabled}
+              onChange={(v) => updateCompressor({ thresholdDb: v })}
+            />
+            <CompSlider
+              label="Ratio"
+              unit=":1"
+              min={1}
+              max={20}
+              step={0.1}
+              value={comp.ratio}
+              disabled={!comp.enabled}
+              onChange={(v) => updateCompressor({ ratio: v })}
+            />
+            <CompSlider
+              label="Attack"
+              unit="ms"
+              min={1}
+              max={200}
+              step={1}
+              value={comp.attackMs}
+              disabled={!comp.enabled}
+              onChange={(v) => updateCompressor({ attackMs: v })}
+            />
+            <CompSlider
+              label="Release"
+              unit="ms"
+              min={20}
+              max={1000}
+              step={10}
+              value={comp.releaseMs}
+              disabled={!comp.enabled}
+              onChange={(v) => updateCompressor({ releaseMs: v })}
+            />
+            <CompSlider
+              label="Make-up"
+              unit="dB"
+              min={-12}
+              max={24}
+              step={0.5}
+              value={comp.makeupDb}
+              disabled={!comp.enabled}
+              onChange={(v) => updateCompressor({ makeupDb: v })}
+            />
+            <div className="flex gap-1">
+              {[
+                { label: "Subtle", v: { thresholdDb: -18, ratio: 2, attackMs: 20, releaseMs: 200, makeupDb: 1 } },
+                { label: "Vocal", v: { thresholdDb: -16, ratio: 4, attackMs: 5, releaseMs: 60, makeupDb: 3 } },
+                { label: "Punch", v: { thresholdDb: -10, ratio: 6, attackMs: 30, releaseMs: 100, makeupDb: 4 } },
+                { label: "Limiter", v: { thresholdDb: -3, ratio: 20, attackMs: 1, releaseMs: 50, makeupDb: 0 } },
+              ].map((p) => (
+                <button
+                  key={p.label}
+                  onClick={() => updateCompressor({ enabled: true, ...p.v })}
+                  className="rounded border border-white/5 px-2 py-0.5 text-[10px] text-zinc-300 hover:bg-white/5"
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <p className="text-xs text-zinc-500">파일을 열면 컴프레서를 사용할 수 있습니다.</p>
+        )}
+      </Section>
+
       <Section title="Smart Compression" icon={<Volume2 size={14} />}>
         <div className="space-y-2">
           <label className="flex items-center justify-between text-xs">
@@ -404,6 +501,23 @@ export function Inspector() {
 
       <Section title="Effect Stack" icon={<Layers size={14} />}>
         <ul className="space-y-1">
+          {comp.enabled && (
+            <li className="glass flex items-center justify-between px-3 py-2">
+              <span className="text-xs">
+                Compressor{" "}
+                <span className="font-mono text-zinc-500">
+                  {comp.thresholdDb.toFixed(0)} dB · {comp.ratio.toFixed(1)}:1
+                </span>
+              </span>
+              <button
+                onClick={() => updateCompressor({ enabled: false })}
+                className="tool-btn h-7 w-7"
+                title="Bypass compressor"
+              >
+                <Power size={12} />
+              </button>
+            </li>
+          )}
           {(Math.abs(eq.low) > 1e-3 || Math.abs(eq.mid) > 1e-3 || Math.abs(eq.high) > 1e-3) && (
             <li className="glass flex items-center justify-between px-3 py-2">
               <span className="text-xs">
@@ -485,6 +599,7 @@ export function Inspector() {
           {effects.length === 0 &&
             fadeIn === 0 &&
             fadeOut === 0 &&
+            !comp.enabled &&
             Math.abs(trackGainDb) < 1e-3 &&
             Math.abs(eq.low) < 1e-3 &&
             Math.abs(eq.mid) < 1e-3 &&
@@ -561,6 +676,47 @@ function FadeControl({
 function fmtBand(db: number): string {
   if (Math.abs(db) < 1e-3) return "0";
   return `${db >= 0 ? "+" : ""}${db.toFixed(1)}`;
+}
+
+function CompSlider({
+  label,
+  unit,
+  min,
+  max,
+  step,
+  value,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  unit: string;
+  min: number;
+  max: number;
+  step: number;
+  value: number;
+  disabled?: boolean;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <div className={disabled ? "opacity-40" : ""}>
+      <label className="flex items-center justify-between">
+        <span className="text-zinc-400">{label}</span>
+        <span className="font-mono accent">
+          {value.toFixed(unit === ":1" ? 1 : unit === "ms" ? 0 : 1)} {unit}
+        </span>
+      </label>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        disabled={disabled}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="mt-1 w-full accent-[var(--accent)]"
+      />
+    </div>
+  );
 }
 
 function EqBand({

@@ -6,6 +6,24 @@
  * round-trip. The Rust version remains the source of truth for export /
  * render passes (which can compare the resulting clip arrays).
  */
+export interface CompressorState {
+  enabled: boolean;
+  thresholdDb: number;
+  ratio: number;
+  attackMs: number;
+  releaseMs: number;
+  makeupDb: number;
+}
+
+export const DEFAULT_COMPRESSOR: CompressorState = {
+  enabled: false,
+  thresholdDb: -18,
+  ratio: 4,
+  attackMs: 10,
+  releaseMs: 80,
+  makeupDb: 0,
+};
+
 export interface Clip {
   id: number;
   sourcePath: string;
@@ -18,6 +36,12 @@ export interface Clip {
   eqLowDb: number;
   eqMidDb: number;
   eqHighDb: number;
+  compEnabled: boolean;
+  compThresholdDb: number;
+  compRatio: number;
+  compAttackMs: number;
+  compReleaseMs: number;
+  compMakeupDb: number;
 }
 
 export interface ClipSpec {
@@ -49,6 +73,12 @@ export function toExportClip(c: Clip) {
     eq_low_db: c.eqLowDb,
     eq_mid_db: c.eqMidDb,
     eq_high_db: c.eqHighDb,
+    comp_enabled: c.compEnabled,
+    comp_threshold_db: c.compThresholdDb,
+    comp_ratio: c.compRatio,
+    comp_attack_ms: c.compAttackMs,
+    comp_release_ms: c.compReleaseMs,
+    comp_makeup_db: c.compMakeupDb,
   };
 }
 
@@ -98,6 +128,12 @@ export class Timeline {
       eqLowDb: spec.eqLowDb ?? 0,
       eqMidDb: spec.eqMidDb ?? 0,
       eqHighDb: spec.eqHighDb ?? 0,
+      compEnabled: DEFAULT_COMPRESSOR.enabled,
+      compThresholdDb: DEFAULT_COMPRESSOR.thresholdDb,
+      compRatio: DEFAULT_COMPRESSOR.ratio,
+      compAttackMs: DEFAULT_COMPRESSOR.attackMs,
+      compReleaseMs: DEFAULT_COMPRESSOR.releaseMs,
+      compMakeupDb: DEFAULT_COMPRESSOR.makeupDb,
     };
     this._clips.push(clip);
     this.sort();
@@ -186,6 +222,12 @@ export class Timeline {
         eqLowDb: clip.eqLowDb,
         eqMidDb: clip.eqMidDb,
         eqHighDb: clip.eqHighDb,
+        compEnabled: clip.compEnabled,
+        compThresholdDb: clip.compThresholdDb,
+        compRatio: clip.compRatio,
+        compAttackMs: clip.compAttackMs,
+        compReleaseMs: clip.compReleaseMs,
+        compMakeupDb: clip.compMakeupDb,
       });
     }
     return out;
@@ -348,6 +390,48 @@ export class Timeline {
     const c = this._clips[0];
     if (!c) return { low: 0, mid: 0, high: 0 };
     return { low: c.eqLowDb, mid: c.eqMidDb, high: c.eqHighDb };
+  }
+
+  /**
+   * Apply track-wide compressor settings. The flag enables or bypasses
+   * the entire stage; the rest are the standard threshold / ratio /
+   * attack / release / makeup parameters.
+   */
+  applyTimelineCompressor(c: CompressorState): boolean {
+    if (this._clips.length === 0) return false;
+    const same = this._clips.every(
+      (clip) =>
+        clip.compEnabled === c.enabled &&
+        Math.abs(clip.compThresholdDb - c.thresholdDb) < 1e-6 &&
+        Math.abs(clip.compRatio - c.ratio) < 1e-6 &&
+        Math.abs(clip.compAttackMs - c.attackMs) < 1e-6 &&
+        Math.abs(clip.compReleaseMs - c.releaseMs) < 1e-6 &&
+        Math.abs(clip.compMakeupDb - c.makeupDb) < 1e-6
+    );
+    if (same) return false;
+    this.snapshot();
+    for (const clip of this._clips) {
+      clip.compEnabled = c.enabled;
+      clip.compThresholdDb = c.thresholdDb;
+      clip.compRatio = c.ratio;
+      clip.compAttackMs = c.attackMs;
+      clip.compReleaseMs = c.releaseMs;
+      clip.compMakeupDb = c.makeupDb;
+    }
+    return true;
+  }
+
+  get timelineCompressor(): CompressorState {
+    const c = this._clips[0];
+    if (!c) return { ...DEFAULT_COMPRESSOR };
+    return {
+      enabled: c.compEnabled,
+      thresholdDb: c.compThresholdDb,
+      ratio: c.compRatio,
+      attackMs: c.compAttackMs,
+      releaseMs: c.compReleaseMs,
+      makeupDb: c.compMakeupDb,
+    };
   }
 
   /** Current fade-in on the first clip, or 0 when the timeline is empty. */

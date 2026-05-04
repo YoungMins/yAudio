@@ -23,6 +23,8 @@ interface AudioGraph {
   eqLow: BiquadFilterNode;
   eqMid: BiquadFilterNode;
   eqHigh: BiquadFilterNode;
+  comp: DynamicsCompressorNode;
+  compMakeup: GainNode;
   fadeGain: GainNode;
   trackGain: GainNode;
 }
@@ -48,17 +50,29 @@ function createGraph(): AudioGraph | null {
     eqHigh.type = "highshelf";
     eqHigh.frequency.value = 4000;
 
+    // DynamicsCompressorNode is always in the chain; we bypass it by
+    // setting ratio=1 / threshold=0 / makeup=1 so it acts as passthrough.
+    const comp = ctx.createDynamicsCompressor();
+    comp.threshold.value = 0;
+    comp.ratio.value = 1;
+    comp.attack.value = 0.01;
+    comp.release.value = 0.08;
+    comp.knee.value = 6;
+    const compMakeup = ctx.createGain();
+
     const fadeGain = ctx.createGain();
     const trackGain = ctx.createGain();
 
     eqLow
       .connect(eqMid)
       .connect(eqHigh)
+      .connect(comp)
+      .connect(compMakeup)
       .connect(fadeGain)
       .connect(trackGain)
       .connect(ctx.destination);
 
-    return { ctx, eqLow, eqMid, eqHigh, fadeGain, trackGain };
+    return { ctx, eqLow, eqMid, eqHigh, comp, compMakeup, fadeGain, trackGain };
   } catch (e) {
     console.error("Audio graph init failed", e);
     return null;
@@ -78,6 +92,7 @@ export function useAudioPlayer() {
   const fadeOut = timeline.timelineFadeOut;
   const trackGainDb = timeline.timelineGainDb;
   const eq = timeline.timelineEq;
+  const comp = timeline.timelineCompressor;
 
   const graphRef = useRef<AudioGraph | null>(null);
   const bufferRef = useRef<AudioBuffer | null>(null);
@@ -303,6 +318,36 @@ export function useAudioPlayer() {
     graph.eqMid.gain.setTargetAtTime(eq.mid, now, 0.01);
     graph.eqHigh.gain.setTargetAtTime(eq.high, now, 0.01);
   }, [eq.low, eq.mid, eq.high]);
+
+  // Compressor live updates
+  useEffect(() => {
+    const graph = graphRef.current;
+    if (!graph) return;
+    const now = graph.ctx.currentTime;
+    if (comp.enabled) {
+      graph.comp.threshold.setTargetAtTime(comp.thresholdDb, now, 0.01);
+      graph.comp.ratio.setTargetAtTime(comp.ratio, now, 0.01);
+      graph.comp.attack.setTargetAtTime(comp.attackMs / 1000, now, 0.01);
+      graph.comp.release.setTargetAtTime(comp.releaseMs / 1000, now, 0.01);
+      graph.compMakeup.gain.setTargetAtTime(
+        dbToLinear(comp.makeupDb),
+        now,
+        0.01
+      );
+    } else {
+      // Bypass: pinned to passthrough behaviour.
+      graph.comp.threshold.setTargetAtTime(0, now, 0.01);
+      graph.comp.ratio.setTargetAtTime(1, now, 0.01);
+      graph.compMakeup.gain.setTargetAtTime(1, now, 0.01);
+    }
+  }, [
+    comp.enabled,
+    comp.thresholdDb,
+    comp.ratio,
+    comp.attackMs,
+    comp.releaseMs,
+    comp.makeupDb,
+  ]);
 
   // Cleanup on unmount
   useEffect(() => {

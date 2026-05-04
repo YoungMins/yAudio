@@ -89,6 +89,12 @@ describe("Timeline — cut and paste", () => {
       eqLowDb: 0,
       eqMidDb: 0,
       eqHighDb: 0,
+      compEnabled: false,
+      compThresholdDb: -18,
+      compRatio: 4,
+      compAttackMs: 10,
+      compReleaseMs: 80,
+      compMakeupDb: 0,
     };
     const clipboard = [
       { ...blank, start: 0 },
@@ -253,6 +259,44 @@ describe("Timeline — track gain", () => {
     expect(t.timelineGainDb).toBeCloseTo(6);
     t.undo();
     expect(t.timelineGainDb).toBe(0);
+  });
+});
+
+describe("Timeline — compressor", () => {
+  it("applyTimelineCompressor sets all compressor fields uniformly", () => {
+    const t = tlWith([
+      [0, 2],
+      [2, 2],
+    ]);
+    const params = {
+      enabled: true,
+      thresholdDb: -12,
+      ratio: 6,
+      attackMs: 5,
+      releaseMs: 100,
+      makeupDb: 3,
+    };
+    expect(t.applyTimelineCompressor(params)).toBe(true);
+    for (const c of t.clips) {
+      expect(c.compEnabled).toBe(true);
+      expect(c.compThresholdDb).toBeCloseTo(-12);
+      expect(c.compRatio).toBeCloseTo(6);
+      expect(c.compMakeupDb).toBeCloseTo(3);
+    }
+    expect(t.timelineCompressor).toEqual(params);
+  });
+
+  it("idempotent — repeated identical apply returns false", () => {
+    const t = tlWith([[0, 5]]);
+    const p = { ...t.timelineCompressor, enabled: true };
+    t.applyTimelineCompressor(p);
+    expect(t.applyTimelineCompressor(p)).toBe(false);
+  });
+
+  it("returns disabled defaults on empty timeline", () => {
+    const c = new Timeline().timelineCompressor;
+    expect(c.enabled).toBe(false);
+    expect(c.thresholdDb).toBe(-18);
   });
 });
 

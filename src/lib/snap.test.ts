@@ -15,6 +15,12 @@ function clip(id: number, start: number, duration: number): Clip {
     eqLowDb: 0,
     eqMidDb: 0,
     eqHighDb: 0,
+    compEnabled: false,
+    compThresholdDb: -18,
+    compRatio: 4,
+    compAttackMs: 10,
+    compReleaseMs: 80,
+    compMakeupDb: 0,
   };
 }
 

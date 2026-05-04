@@ -27,6 +27,33 @@ pub struct Clip {
     pub eq_mid_db: f32,
     #[serde(default)]
     pub eq_high_db: f32,
+    /// Compressor enable + parameters. When `comp_enabled` is false the
+    /// other fields are ignored and the render pass skips compression.
+    #[serde(default)]
+    pub comp_enabled: bool,
+    #[serde(default = "default_comp_threshold")]
+    pub comp_threshold_db: f32,
+    #[serde(default = "default_comp_ratio")]
+    pub comp_ratio: f32,
+    #[serde(default = "default_comp_attack")]
+    pub comp_attack_ms: f32,
+    #[serde(default = "default_comp_release")]
+    pub comp_release_ms: f32,
+    #[serde(default)]
+    pub comp_makeup_db: f32,
+}
+
+fn default_comp_threshold() -> f32 {
+    -18.0
+}
+fn default_comp_ratio() -> f32 {
+    4.0
+}
+fn default_comp_attack() -> f32 {
+    10.0
+}
+fn default_comp_release() -> f32 {
+    80.0
 }
 
 impl Clip {
@@ -91,6 +118,12 @@ impl Timeline {
             eq_low_db: 0.0,
             eq_mid_db: 0.0,
             eq_high_db: 0.0,
+            comp_enabled: false,
+            comp_threshold_db: default_comp_threshold(),
+            comp_ratio: default_comp_ratio(),
+            comp_attack_ms: default_comp_attack(),
+            comp_release_ms: default_comp_release(),
+            comp_makeup_db: 0.0,
         };
         self.clips.push(clip);
         self.clips.sort_by(|a, b| a.start.total_cmp(&b.start));
@@ -142,6 +175,12 @@ impl Timeline {
                     eq_low_db: clip.eq_low_db,
                     eq_mid_db: clip.eq_mid_db,
                     eq_high_db: clip.eq_high_db,
+                    comp_enabled: clip.comp_enabled,
+                    comp_threshold_db: clip.comp_threshold_db,
+                    comp_ratio: clip.comp_ratio,
+                    comp_attack_ms: clip.comp_attack_ms,
+                    comp_release_ms: clip.comp_release_ms,
+                    comp_makeup_db: clip.comp_makeup_db,
                     source_path: clip.source_path.clone(),
                 };
                 next.push(left);
@@ -197,6 +236,12 @@ impl Timeline {
                 eq_low_db: clip.eq_low_db,
                 eq_mid_db: clip.eq_mid_db,
                 eq_high_db: clip.eq_high_db,
+                comp_enabled: clip.comp_enabled,
+                comp_threshold_db: clip.comp_threshold_db,
+                comp_ratio: clip.comp_ratio,
+                comp_attack_ms: clip.comp_attack_ms,
+                comp_release_ms: clip.comp_release_ms,
+                comp_makeup_db: clip.comp_makeup_db,
             });
         }
         out
@@ -386,6 +431,57 @@ impl Timeline {
         }
     }
 
+    /// Apply track-wide compressor settings to every clip uniformly.
+    #[allow(clippy::too_many_arguments)]
+    pub fn apply_timeline_compressor(
+        &mut self,
+        enabled: bool,
+        threshold_db: f32,
+        ratio: f32,
+        attack_ms: f32,
+        release_ms: f32,
+        makeup_db: f32,
+    ) -> bool {
+        if self.clips.is_empty() {
+            return false;
+        }
+        let same = self.clips.iter().all(|c| {
+            c.comp_enabled == enabled
+                && (c.comp_threshold_db - threshold_db).abs() < 1e-6
+                && (c.comp_ratio - ratio).abs() < 1e-6
+                && (c.comp_attack_ms - attack_ms).abs() < 1e-6
+                && (c.comp_release_ms - release_ms).abs() < 1e-6
+                && (c.comp_makeup_db - makeup_db).abs() < 1e-6
+        });
+        if same {
+            return false;
+        }
+        self.snapshot();
+        for c in self.clips.iter_mut() {
+            c.comp_enabled = enabled;
+            c.comp_threshold_db = threshold_db;
+            c.comp_ratio = ratio;
+            c.comp_attack_ms = attack_ms;
+            c.comp_release_ms = release_ms;
+            c.comp_makeup_db = makeup_db;
+        }
+        true
+    }
+
+    pub fn timeline_compressor(&self) -> (bool, f32, f32, f32, f32, f32) {
+        match self.clips.first() {
+            Some(c) => (
+                c.comp_enabled,
+                c.comp_threshold_db,
+                c.comp_ratio,
+                c.comp_attack_ms,
+                c.comp_release_ms,
+                c.comp_makeup_db,
+            ),
+            None => (false, -18.0, 4.0, 10.0, 80.0, 0.0),
+        }
+    }
+
     pub fn timeline_fade_in(&self) -> f64 {
         self.clips.first().map(|c| c.fade_in).unwrap_or(0.0)
     }
@@ -509,6 +605,12 @@ mod tests {
             eq_low_db: 0.0,
             eq_mid_db: 0.0,
             eq_high_db: 0.0,
+            comp_enabled: false,
+            comp_threshold_db: -18.0,
+            comp_ratio: 4.0,
+            comp_attack_ms: 10.0,
+            comp_release_ms: 80.0,
+            comp_makeup_db: 0.0,
         }];
         clipboard.push(Clip {
             start: 1.0,

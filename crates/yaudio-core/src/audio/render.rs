@@ -5,6 +5,7 @@
 //! supply deterministic samples without touching the filesystem.
 
 use crate::audio::biquad::Biquad;
+use crate::audio::compressor::{compress_buffer, CompressorParams};
 use crate::audio::decoder;
 use crate::audio::editor::{Clip, Timeline};
 use crate::error::{AudioError, AudioResult};
@@ -45,11 +46,31 @@ pub fn render_mono(
     }
 
     apply_eq_if_set(&mut out, timeline, sample_rate);
+    apply_compressor_if_enabled(&mut out, timeline, sample_rate);
 
     for s in &mut out {
         *s = s.clamp(-1.0, 1.0);
     }
     Ok(out)
+}
+
+fn apply_compressor_if_enabled(out: &mut [f32], timeline: &Timeline, sample_rate: u32) {
+    let Some(first) = timeline.clips().first() else { return };
+    if !first.comp_enabled {
+        return;
+    }
+    compress_buffer(
+        out,
+        sample_rate,
+        CompressorParams {
+            threshold_db: first.comp_threshold_db,
+            ratio: first.comp_ratio,
+            attack_ms: first.comp_attack_ms,
+            release_ms: first.comp_release_ms,
+            knee_db: 6.0,
+            makeup_db: first.comp_makeup_db,
+        },
+    );
 }
 
 /// Run the buffer through a 3-band EQ if any band is non-zero. EQ
